@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/user"
@@ -131,7 +132,8 @@ func TestFmtd(t *testing.T) {
 				defer cleanup()
 
 				var stderr bytes.Buffer
-				err := fmtd.Fmt(ctx, pwd, dryrun, &stderr, fs.Filenames())
+				buf := io.MultiWriter(os.Stderr, &stderr)
+				err := fmtd.Fmt(ctx, pwd, dryrun, buf, fs.Filenames())
 				switch {
 				case len(fs.Filenames()) == 0:
 					require.NoError(t, err)
