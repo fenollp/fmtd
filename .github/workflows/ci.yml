@@ -11,7 +11,7 @@ jobs:
         go: ['1.x']
         os:
         - ubuntu-20.04
-        - windows-2022
+        # - windows-2022
         - macos-11
     runs-on: ${{ matrix.os }}
     defaults:
@@ -44,7 +44,7 @@ jobs:
         os:
         # https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions#jobsjob_idruns-on
         - ubuntu-20.04
-        - windows-2022
+        # - windows-2022
         - macos-11
     runs-on: ${{ matrix.os }}
     defaults:
@@ -100,8 +100,8 @@ jobs:
       run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
 
     - run: go test -tags osusergo -v ./...
-      if: runner.os != 'Windows'
-    - if: runner.os == 'Windows'
-      run: go test -tags osusergo -v -p 1 ./...
+    #   if: runner.os != 'Windows'
+    # - if: runner.os == 'Windows'
+    #   run: go test -tags osusergo -v -p 1 ./...
     - if: runner.os == 'Linux'
       run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
