@@ -5,16 +5,29 @@ on:
 
 jobs:
   test-install:
-    runs-on: ubuntu-latest
-    name: buildkit on ubuntu
+    strategy:
+      # fail-fast: true
+      matrix:
+        go: ['1.x']
+        os:
+        - ubuntu-20.04
+        - windows-2022
+        - macos-11
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    name: buildkit on ${{ matrix.os }}
     steps:
+    - uses: docker-practice/actions-setup-docker@master
+      if: runner.os == 'macOS'
     - uses: docker/login-action@v1
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
     - uses: actions/checkout@v2
-    - run: DOCKER_BUILDKIT=1 docker build -o=. --progress=plain .
-    - run: fmtd
+    - run: DOCKER_BUILDKIT=1 docker build --platform=local --output=. --progress=plain .
+    - run: ./fmtd*
 
   build-and-test:
     env:
@@ -24,17 +37,20 @@ jobs:
       # fail-fast: true
       matrix:
         go: ['1.x']
-        # Locked at https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions#jobsjob_idruns-on
         os:
-        - ubuntu-latest
-        - windows-latest
-        - macos-latest
+        # https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions#jobsjob_idruns-on
+        - ubuntu-20.04
+        - windows-2022
+        - macos-11
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
     name: ${{ matrix.go }} on ${{ matrix.os }}
     steps:
+    - uses: docker-practice/actions-setup-docker@master
+      if: runner.os == 'macOS'
+
     - uses: docker/login-action@v1
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
