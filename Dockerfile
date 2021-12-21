@@ -5,18 +5,20 @@ FROM --platform=$BUILDPLATFORM docker.io/library/golang:1@sha256:4918412049183af
 FROM golang AS build
 WORKDIR /app
 ENV CGO_ENABLED=0
+ARG TARGETOS
+ARG TARGETARCH
 COPY go.??? .
 RUN \
   --mount=type=cache,target=/go/pkg/mod \
   --mount=type=cache,target=/root/.cache/go-build \
     set -ux \
- && go mod download
+ && GOOS=$TARGETOS GOARCH=$TARGETARCH go mod download
 COPY . .
 RUN \
   --mount=type=cache,target=/go/pkg/mod \
   --mount=type=cache,target=/root/.cache/go-build \
     set -ux \
- && go build -tags osusergo -o fmtd -ldflags '-s -w -extldflags "-static"' ./cmd
+ && GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags osusergo -o fmtd -ldflags '-s -w -extldflags "-static"' ./cmd
 
 FROM scratch
 COPY --from=build /app/fmtd /
