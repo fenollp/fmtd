@@ -28,9 +28,9 @@ jobs:
         password: ${{ secrets.DOCKERHUB_TOKEN }}
     - uses: actions/checkout@v2
     - run: DOCKER_BUILDKIT=1 docker build --platform=local --output=. --progress=plain .
-      if: runner.os != 'Windows'
-    - run: docker build --output=. --progress=plain .
-      if: runner.os == 'Windows'
+    #   if: runner.os != 'Windows'
+    # - run: docker build --output=. --progress=plain .
+    #   if: runner.os == 'Windows'
     - run: ./fmtd*
 
   build-and-test:
@@ -100,5 +100,8 @@ jobs:
       run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
 
     - run: go test -tags osusergo -v ./...
+      if: runner.os != 'Windows'
+    - if: runner.os == 'Windows'
+      run: go test -tags osusergo -v -p 1 ./...
     - if: runner.os == 'Linux'
       run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
