@@ -1,7 +1,5 @@
 package fmtd_test
 
-// CGO_ENABLED=0 go test -tags osusergo -v -run Fmtd ./...
-
 import (
 	"bytes"
 	"context"
