@@ -16,6 +16,9 @@ import (
 // ErrNoDocker is returned when no usable Docker client can be found
 var ErrNoDocker = errors.New("No docker client found: curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh")
 
+// ErrDryRunFoundFiles is returned when a run would have modified files if it weren't for dryrun
+var ErrDryRunFoundFiles = errors.New("unformatted files found")
+
 func unusable(fn string) error { return fmt.Errorf("unusable file: %q", fn) }
 
 // Fmt formats (any) files below the current directory

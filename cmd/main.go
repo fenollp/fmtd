@@ -27,6 +27,9 @@ func main() {
 	}
 
 	if err := fmtd.Fmt(ctx, pwd, dryrun, os.Stderr, flag.Args()); err != nil {
+		if err == fmtd.ErrDryRunFoundFiles {
+			os.Exit(2)
+		}
 		log.Fatal(err)
 	}
 }
