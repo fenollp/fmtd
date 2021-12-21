@@ -1,4 +1,4 @@
-module github.com/fenollp/fmt
+module github.com/fenollp/fmtd
 
 go 1.17
 

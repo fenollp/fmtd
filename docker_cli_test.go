@@ -1,4 +1,4 @@
-package fmttr_test
+package fmtd_test
 
 import (
 	"context"

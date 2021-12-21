@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	fmttr "github.com/fenollp/fmt"
+	"github.com/fenollp/fmtd"
 )
 
 var dryrun bool
@@ -26,7 +26,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := fmttr.Fmt(ctx, pwd, dryrun, os.Stderr, flag.Args()); err != nil {
+	if err := fmtd.Fmt(ctx, pwd, dryrun, os.Stderr, flag.Args()); err != nil {
 		log.Fatal(err)
 	}
 }
