@@ -4,12 +4,24 @@ on:
   push:
 
 jobs:
+  test-install:
+    runs-on: ubuntu-latest
+    name: buildkit on ubuntu
+    steps:
+    - uses: docker/login-action@v1
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    - uses: actions/checkout@v2
+    - run: DOCKER_BUILDKIT=1 docker build -o=. --progress=plain .
+    - run: fmtd
+
   build-and-test:
     env:
       GO111MODULE: 'on'
       CGO_ENABLED: '0'
     strategy:
-      fail-fast: true
+      # fail-fast: true
       matrix:
         go: ['1.x']
         # Locked at https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions#jobsjob_idruns-on
@@ -23,6 +35,10 @@ jobs:
         shell: bash
     name: ${{ matrix.go }} on ${{ matrix.os }}
     steps:
+    - uses: docker/login-action@v1
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
 
     - uses: actions/setup-go@v2
       with:
