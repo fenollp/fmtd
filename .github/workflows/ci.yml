@@ -6,12 +6,13 @@ on:
 jobs:
   test-install:
     strategy:
-      # fail-fast: true
+      fail-fast: true
       matrix:
         go: ['1.x']
+        # https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions#jobsjob_idruns-on
         os:
         - ubuntu-20.04
-        # - windows-2022
+        # - windows-2022 TODO
         - macos-11
     runs-on: ${{ matrix.os }}
     defaults:
@@ -28,9 +29,6 @@ jobs:
         password: ${{ secrets.DOCKERHUB_TOKEN }}
     - uses: actions/checkout@v2
     - run: DOCKER_BUILDKIT=1 docker build --platform=local --output=. --progress=plain .
-    #   if: runner.os != 'Windows'
-    # - run: docker build --output=. --progress=plain .
-    #   if: runner.os == 'Windows'
     - run: ./fmtd*
 
   build-and-test:
@@ -38,13 +36,12 @@ jobs:
       GO111MODULE: 'on'
       CGO_ENABLED: '0'
     strategy:
-      # fail-fast: true
+      fail-fast: true
       matrix:
         go: ['1.x']
         os:
-        # https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions#jobsjob_idruns-on
         - ubuntu-20.04
-        # - windows-2022
+        # - windows-2022 TODO
         - macos-11
     runs-on: ${{ matrix.os }}
     defaults:
@@ -100,8 +97,5 @@ jobs:
       run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
 
     - run: go test -tags osusergo -v ./...
-    #   if: runner.os != 'Windows'
-    # - if: runner.os == 'Windows'
-    #   run: go test -tags osusergo -v -p 1 ./...
     - if: runner.os == 'Linux'
       run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
