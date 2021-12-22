@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
+	"fmt"
 	"os"
 
 	"github.com/fenollp/fmtd"
@@ -14,22 +14,26 @@ var dryrun bool
 func init() {
 	flag.BoolVar(&dryrun, "n", false, "dry run: no files will be written")
 	flag.Parse()
-
-	log.SetFlags(log.Lshortfile | log.Lmicroseconds | log.LUTC)
 }
 
 func main() {
 	ctx := context.Background()
 
+	perr := func(err error) { fmt.Fprintf(os.Stderr, "fmtd: %v\n", err) }
+
 	pwd, err := os.Getwd()
 	if err != nil {
-		log.Fatal(err)
+		perr(err)
+		os.Exit(1)
 	}
 
-	if err := fmtd.Fmt(ctx, pwd, dryrun, os.Stderr, flag.Args()); err != nil {
-		if err == fmtd.ErrDryRunFoundFiles {
-			os.Exit(2)
-		}
-		log.Fatal(err)
+	switch err := fmtd.Fmt(ctx, pwd, dryrun, os.Stderr, flag.Args()); err {
+	case nil:
+	case fmtd.ErrDryRunFoundFiles:
+		perr(err)
+		os.Exit(2)
+	default:
+		perr(err)
+		os.Exit(1)
 	}
 }

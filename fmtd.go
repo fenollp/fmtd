@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +20,9 @@ var ErrNoDocker = errors.New("No docker client found: curl -fsSL https://get.doc
 // ErrDryRunFoundFiles is returned when a run would have modified files if it weren't for dryrun
 var ErrDryRunFoundFiles = errors.New("unformatted files found")
 
-func unusable(fn string) error { return fmt.Errorf("unusable file: %q", fn) }
+func unusable(fn string, err error) error {
+	return fmt.Errorf("unusable file %q (%v)", fn, err)
+}
 
 // Fmt formats (any) files below the current directory
 func Fmt(
@@ -32,7 +34,6 @@ func Fmt(
 ) error {
 	exe, err := exec.LookPath("docker")
 	if err != nil {
-		log.Println(err)
 		return ErrNoDocker
 	}
 
@@ -118,16 +119,13 @@ COPY --from=product /app/b/* /
 			Size: int64(len(file.Body)),
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
-			log.Println(err)
 			return err
 		}
 		if _, err := tw.Write([]byte(file.Body)); err != nil {
-			log.Println(err)
 			return err
 		}
 	}
 	if err := tw.Close(); err != nil {
-		log.Println(err)
 		return err
 	}
 
@@ -140,7 +138,6 @@ COPY --from=product /app/b/* /
 	cmd.Stdout = &stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		log.Println(err)
 		return err
 	}
 
@@ -152,7 +149,6 @@ COPY --from=product /app/b/* /
 			break // End of archive
 		}
 		if err != nil {
-			log.Println(err)
 			return err
 		}
 		fmt.Println(hdr.Name)
@@ -165,9 +161,7 @@ COPY --from=product /app/b/* /
 		}
 	}
 	if dryrun && foundFiles {
-		err := ErrDryRunFoundFiles
-		log.Println(err)
-		return err
+		return ErrDryRunFoundFiles
 	}
 
 	return nil
@@ -175,20 +169,15 @@ COPY --from=product /app/b/* /
 
 func ensureUnder(pwd, fn string) (err error) {
 	if filepath.VolumeName(fn) != filepath.VolumeName(pwd) {
-		err = unusable(fn)
-		log.Println(err)
-		return
+		return unusable(fn, errors.New("not on $PWD's volume"))
 	}
 	if fn[0] == '.' || filepath.IsAbs(fn) {
 		var fnabs string
 		if fnabs, err = filepath.Abs(fn); err != nil {
-			log.Println(err)
-			return unusable(fn)
+			return unusable(fn, err)
 		}
 		if !filepath.HasPrefix(fnabs, pwd) {
-			err = unusable(fn)
-			log.Println(err)
-			return
+			return unusable(fn, errors.New("not under $PWD"))
 		}
 	}
 	return
@@ -197,22 +186,19 @@ func ensureUnder(pwd, fn string) (err error) {
 func ensureWritable(fn string) error {
 	fd, err := os.OpenFile(fn, os.O_RDWR, 0200)
 	if err != nil {
-		log.Println(err)
-		return unusable(fn)
+		return unusable(fn, err.(*fs.PathError).Unwrap())
 	}
 	if err := fd.Close(); err != nil {
-		log.Println(err)
-		return unusable(fn)
+		return unusable(fn, err)
 	}
 	return nil
 }
 
 func ensureRegular(fn string) error {
 	if fi, err := os.Lstat(fn); err != nil {
-		log.Println(err)
-		return unusable(fn)
+		return unusable(fn, err.(*fs.PathError).Unwrap())
 	} else if !fi.Mode().IsRegular() {
-		return unusable(fn)
+		return unusable(fn, errors.New("not a regular file"))
 	}
 	return nil
 }

@@ -140,22 +140,22 @@ func TestFmtd(t *testing.T) {
 					fs.Unchanged(t)
 
 				case strings.Contains(name, "_fns:_len:1_"):
-					require.EqualError(t, err, `unusable file: ""`)
+					require.EqualError(t, err, `unusable file "" (no such file or directory)`)
 					require.Empty(t, stderr.String())
 					fs.Unchanged(t)
 
 				case strings.Contains(name, "non-existing-file"):
-					require.EqualError(t, err, `unusable file: "non-existing-file"`)
+					require.EqualError(t, err, `unusable file "non-existing-file" (no such file or directory)`)
 					require.Empty(t, stderr.String())
 					fs.Unchanged(t)
 
 				case strings.Contains(name, ":testdata+"):
-					require.EqualError(t, err, `unusable file: "testdata"`)
+					require.EqualError(t, err, `unusable file "testdata" (not a regular file)`)
 					require.Empty(t, stderr.String())
 					fs.Unchanged(t)
 
 				case strings.Contains(name, "+testdata/sym_"):
-					require.EqualError(t, err, `unusable file: "testdata/sym"`)
+					require.EqualError(t, err, `unusable file "testdata/sym" (not a regular file)`)
 					require.Empty(t, stderr.String())
 					fs.Unchanged(t)
 
@@ -164,13 +164,13 @@ func TestFmtd(t *testing.T) {
 						require.NoError(t, err)
 						require.NotEmpty(t, stderr.String())
 					} else {
-						require.EqualError(t, err, `unusable file: "testdata/blip"`)
+						require.EqualError(t, err, `unusable file "testdata/blip" (permission denied)`)
 						require.Empty(t, stderr.String())
 					}
 					fs.Unchanged(t)
 
 				case strings.Contains(name, HOME+"/some_outside.yml+"):
-					require.EqualError(t, err, `unusable file: "`+HOME+`/some_outside.yml"`)
+					require.EqualError(t, err, `unusable file "`+HOME+`/some_outside.yml" (not under $PWD)`)
 					require.Empty(t, stderr.String())
 					fs.Unchanged(t)
 
