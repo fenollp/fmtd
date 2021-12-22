@@ -137,6 +137,7 @@ COPY --from=product /app/b/* /
 	}
 
 	tr := tar.NewReader(&stdout)
+	foundFiles := false
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -154,6 +155,11 @@ COPY --from=product /app/b/* /
 			}
 			fmt.Println()
 		}
+	}
+	if dryrun && foundFiles {
+		err := ErrDryRunFoundFiles
+		log.Println(err)
+		return err
 	}
 
 	return nil
