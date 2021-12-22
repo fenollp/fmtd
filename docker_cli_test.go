@@ -12,6 +12,9 @@ import (
 
 func TestDockerCLIWithDOCKERHOST(t *testing.T) {
 	ctx := context.Background()
+	if os.Getenv("CI") == "true" {
+		t.Skipf("run this in your shell...")
+	}
 
 	err := os.Setenv("DOCKER_HOST", "ssh://flatbit")
 	require.NoError(t, err)

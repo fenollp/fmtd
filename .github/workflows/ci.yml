@@ -1,40 +1,58 @@
 name: go
 on:
-  pull_request:
+  # pull_request:
   push:
 
 jobs:
   test-install:
-    runs-on: ubuntu-latest
-    name: buildkit on ubuntu
+    strategy:
+      fail-fast: true
+      matrix:
+        go: ['1.x']
+        # https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions#jobsjob_idruns-on
+        os:
+        - ubuntu-20.04
+        # - windows-2022 TODO
+        - macos-11
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    name: buildkit on ${{ matrix.os }}
     steps:
+    - uses: docker-practice/actions-setup-docker@master
+      if: runner.os == 'macOS'
+    - run: docker version
     - uses: docker/login-action@v1
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
     - uses: actions/checkout@v2
-    - run: DOCKER_BUILDKIT=1 docker build -o=. --progress=plain .
-    - run: fmtd
+    - run: DOCKER_BUILDKIT=1 docker build --platform=local --output=. --progress=plain .
+    - run: ./fmtd*
 
   build-and-test:
     env:
       GO111MODULE: 'on'
       CGO_ENABLED: '0'
     strategy:
-      # fail-fast: true
+      fail-fast: true
       matrix:
         go: ['1.x']
-        # Locked at https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions#jobsjob_idruns-on
         os:
-        - ubuntu-latest
-        - windows-latest
-        - macos-latest
+        - ubuntu-20.04
+        # - windows-2022 TODO
+        - macos-11
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
     name: ${{ matrix.go }} on ${{ matrix.os }}
     steps:
+    - uses: docker-practice/actions-setup-docker@master
+      if: runner.os == 'macOS'
+
+    - run: docker version
     - uses: docker/login-action@v1
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -81,14 +99,3 @@ jobs:
     - run: go test -tags osusergo -v ./...
     - if: runner.os == 'Linux'
       run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
-
-
-    - if: runner.os == 'Linux'
-      name: Errors must not be capitalized https://github.com/golang/go/wiki/CodeReviewComments#error-strings
-      run: |
-        ! git grep -E '(fmt|errors)[^(]+\(.[A-Z]'
-
-    - if: runner.os == 'Linux'
-      name: Did you mean %q
-      run: |
-        ! git grep -E "'[%].'"
