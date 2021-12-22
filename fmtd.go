@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // ErrNoDocker is returned when no usable Docker client can be found
@@ -22,6 +23,73 @@ var ErrDryRunFoundFiles = errors.New("unformatted files found")
 
 func unusable(fn string, err error) error {
 	return fmt.Errorf("unusable file %q (%v)", fn, err)
+}
+
+func dockerfile() []byte {
+	patterns := []string{
+		// C / C++ / Protocol Buffers / Objective-C / Objective-C++
+		"*.c", "*.cc", "*.cpp", "*.h", "*.hh", "*.proto", "*.m", "*.mm",
+		// JSON
+		"*.json",
+		// YAML
+		"*.yaml", "*.yml",
+		// Python
+		"*.py",
+		// Erlang
+		"*.erl",
+		// Bazel / Skylark / Starlark
+		"BUILD", "*.BUILD", "*.bzl", "*.sky", "*.star", "WORKSPACE",
+	}
+
+	return []byte(`
+# syntax=docker.io/docker/dockerfile:1@sha256:42399d4635eddd7a9b8a24be879d2f9a930d0ed040a61324cfdf59ef1357b3b2
+`[1:] + `
+FROM --platform=$BUILDPLATFORM docker.io/library/alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300 AS alpine
+
+# See https://github.com/Unibeautify/docker-beautifiers
+
+FROM alpine AS tool
+COPY --from=unibeautify/clang-format /usr/bin/clang-format /usr/bin/clang-format
+WORKDIR /app/b
+WORKDIR /app/a
+ARG YAPF_VERSION=0.31.0
+ARG BEAUTYSH_VERSION=6.2.1
+ARG SQLFORMAT_VERSION=0.4.2
+RUN \
+  --mount=type=cache,target=/var/cache/apk ln -vs /var/cache/apk /etc/apk/cache && \
+    set -ux \
+ && apk add --no-cache py3-pip clang emacs jq \
+ && pip3 install \
+      yapf=="$YAPF_VERSION" \
+      beautysh=="$BEAUTYSH_VERSION" \
+      sqlparse=="$SQLFORMAT_VERSION"
+
+FROM tool AS product
+COPY a /app/a/
+RUN \
+    set -ux \
+ && while read -r f; do \
+      mkdir -p ../b/"$(dirname "$f")" \
+      && \
+      case "$f" in \
+        *.c|*.cc|*.cpp|*.h|*.hh|*.proto|*.m|*.mm) clang-format -style=google -sort-includes "$f" >../b/"$f";; \
+        *.json) cat "$f" | jq -S --tab . >../b/"$f" ;; \
+        *.py) yapf --style=google "$f" >../b/"$f" ;; \
+        *.sh) beautysh --backup "$f" && mv "$f".bak ../b/"$f" ;; \
+        *.sql) sqlformat "$f" >../b/"$f" ;; \
+        *) echo "unhandled $f" ;; \
+      esac \
+      && \
+      if diff -q "$f" ../b/"$f" >/dev/null; then rm ../b/"$f"; fi \
+      ; \
+   done < <(find . -type f \( -iname '` + strings.Join(patterns, "' -or -iname '") + `' \))
+
+FROM scratch
+COPY --from=product /app/b/* /
+`)
+	// #*.yaml|*.yml)  $HOME/.bin/format-yaml.sh "$f" ;; \
+	// #*.erl)  emacs --script $HOME/.bin/erlfmt.el "$f" ;;#TODO: use my erlfmt \
+	// #BUILD|*/BUILD|*.BUILD|*.bzl|*.sky|*.star|WORKSPACE|*/WORKSPACE) buildifier -lint=fix "$f" ;; \
 }
 
 // Fmt formats (any) files below the current directory
@@ -40,9 +108,12 @@ func Fmt(
 	if len(filenames) == 0 {
 		return nil
 	}
-	fns := make(map[string]struct{}, len(filenames))
+	files := make(map[string][]byte, len(filenames))
 	for _, filename := range filenames {
-		if err := ensureRegular(filename); err != nil {
+		if _, ok := files[filename]; ok {
+			continue
+		}
+		if err := ensureRegular(filename); err != nil { // TODO: expand directories
 			return err
 		}
 		if err := ensureUnder(pwd, filename); err != nil {
@@ -53,75 +124,45 @@ func Fmt(
 				return err
 			}
 		}
-		fns[filename] = struct{}{}
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			return unusable(filename, err)
+		}
+		files[filename] = data
 	}
-	filenames = make([]string, 0, len(fns))
-	for fn := range fns {
-		filenames = append(filenames, fn)
+	filenames = make([]string, 0, len(files))
+	for filename := range files {
+		filenames = append(filenames, filename)
 	}
 	sort.Strings(filenames)
 
 	var stdin bytes.Buffer
 	tw := tar.NewWriter(&stdin)
-	var files = []struct {
-		Name, Body string
-	}{
-		{"readme.txt", "This archive contains some text files."},
-		{"gopher.txt", "Gopher names:\nGeorge\nGeoffrey\nGonzo"},
-		{"todo.txt", "Get animal handling license."},
-		{"Dockerfile", `
-# syntax=docker.io/docker/dockerfile:1@sha256:42399d4635eddd7a9b8a24be879d2f9a930d0ed040a61324cfdf59ef1357b3b2
-
-FROM --platform=$BUILDPLATFORM docker.io/library/alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300 AS alpine
-
-FROM alpine AS tool
-WORKDIR /app/b
-WORKDIR /app
-
-FROM tool AS product
-COPY . /app/a/
-RUN \
-    set -ux \
- && cat a/gopher.txt >b/gopher.txt && echo blaaa >>b/gopher.txt \
- && fn=gopher.txt; if diff -q a/"$fn" b/"$fn" >/dev/null; then rm b/"$fn"; fi \
- && echo hello >b/README
-
-FROM scratch
-COPY --from=product /app/b/* /
-`[1:]},
-
-		// fmt() {
-		//     #TODO: loop inside scripts
-		//     #TODO: use my erlfmt
-		//     until [[ "$1" = '' ]]; do
-		//         local file="$1"
-		//         case "$file" in
-		//             *.c|*.cc|*.cpp|*.h|*.hh|*.proto|*.m|*.mm)
-		//                 clang-format -i -style=google -sort-includes "$file" ;;
-		//             *.json)  cat "$file" | jq -S --tab . >"$file"~ && mv "$file"~ "$file" ;;
-		//             *.yaml|*.yml)  $HOME/.bin/format-yaml.sh "$file" ;;
-		//             *.py) $HOME/.local/bin/yapf --in-place --style=google "$file" ;;
-		//             *.erl)  emacs --script $HOME/.bin/erlfmt.el "$file" ;;
-		//             BUILD|*/BUILD|*.BUILD|*.bzl|*.sky|*.star|WORKSPACE|*/WORKSPACE)
-		//                 buildifier -lint=fix "$file" ;;
-		//             # *.sh) shfmt -i 2 -ci -w -kp -s "$file" ;; # go get mvdan.cc/sh/cmd/shfmt
-		//             *)  return 1 ;;
-		//         esac
-		//         [[ $? -ne 0 ]] && return 2
-		//         shift
-		//     done
-		// }
-	}
-	for _, file := range files {
+	{
+		data := dockerfile()
 		hdr := &tar.Header{
-			Name: file.Name,
-			Mode: 0600, // TODO: clone file attributes but: may not translate + writing should not need them as no new files get created
-			Size: int64(len(file.Body)),
+			Name: "Dockerfile",
+			Mode: 0200,
+			Size: int64(len(data)),
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
-		if _, err := tw.Write([]byte(file.Body)); err != nil {
+		if _, err := tw.Write(data); err != nil {
+			return err
+		}
+	}
+	for _, filename := range filenames {
+		data := files[filename]
+		hdr := &tar.Header{
+			Name: filepath.Join("a", filename),
+			Mode: 0600,
+			Size: int64(len(data)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if _, err := tw.Write(data); err != nil {
 			return err
 		}
 	}
@@ -151,13 +192,31 @@ COPY --from=product /app/b/* /
 		if err != nil {
 			return err
 		}
+		if strings.HasSuffix(hdr.Name, "/") {
+			continue
+		}
 		fmt.Println(hdr.Name)
 		if !dryrun {
-			if _, err := io.Copy(os.Stdout, tr); err != nil {
-				log.Println(err)
+			f, err := os.OpenFile(hdr.Name, os.O_RDWR, 0) // already exists
+			if err != nil {
+				return err
+			}
+			if err := f.Truncate(0); err != nil {
+				return err
+			}
+			if _, err := f.Seek(0, 0); err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				return err
+			}
+			if err := f.Close(); err != nil {
 				return err
 			}
 			fmt.Println()
+			// write to fn~(~ as many as needed)
+			// created from fmode
+			// then mv
 		}
 	}
 	if dryrun && foundFiles {
@@ -184,11 +243,11 @@ func ensureUnder(pwd, fn string) (err error) {
 }
 
 func ensureWritable(fn string) error {
-	fd, err := os.OpenFile(fn, os.O_RDWR, 0200)
+	f, err := os.OpenFile(fn, os.O_RDWR, 0200)
 	if err != nil {
 		return unusable(fn, err.(*fs.PathError).Unwrap())
 	}
-	if err := fd.Close(); err != nil {
+	if err := f.Close(); err != nil {
 		return unusable(fn, err)
 	}
 	return nil

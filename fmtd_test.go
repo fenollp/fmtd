@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
+	"io"
 	"os"
 	"os/user"
 	"sort"
@@ -14,18 +14,6 @@ import (
 	"github.com/fenollp/fmtd"
 	"github.com/stretchr/testify/require"
 )
-
-var HOME string
-
-func init() {
-	log.SetFlags(log.Lshortfile | log.Lmicroseconds | log.LUTC)
-
-	u, err := user.Current()
-	if err != nil {
-		log.Fatal(err)
-	}
-	HOME = u.HomeDir
-}
 
 type tmpfiles map[string][]byte
 
@@ -105,6 +93,9 @@ func TestFmtd(t *testing.T) {
 	ctx := context.Background()
 	pwd, err := os.Getwd()
 	require.NoError(t, err)
+	u, err := user.Current()
+	require.NoError(t, err)
+	HOME := u.HomeDir
 
 	for _, fs := range []tmpfiles{
 		// No files: don't fail but still check for usable docker client
@@ -131,8 +122,8 @@ func TestFmtd(t *testing.T) {
 				defer cleanup()
 
 				var stderr bytes.Buffer
-				// buf := io.MultiWriter(os.Stderr, &stderr)
-				err := fmtd.Fmt(ctx, pwd, dryrun, &stderr, fs.Filenames())
+				buf := io.MultiWriter(newTestingLogWriter(t), &stderr)
+				err := fmtd.Fmt(ctx, pwd, dryrun, buf, fs.Filenames())
 				switch {
 				case len(fs.Filenames()) == 0:
 					require.NoError(t, err)
@@ -185,3 +176,17 @@ func TestFmtd(t *testing.T) {
 // files not handled
 // files already fmtd
 // files
+// dryrun files that need fmting
+
+type tLogWriter struct {
+	t *testing.T
+}
+
+func (tlw *tLogWriter) Write(p []byte) (n int, err error) {
+	tlw.t.Logf("%s", p)
+	return len(p), nil
+}
+
+func newTestingLogWriter(t *testing.T) io.Writer {
+	return &tLogWriter{t}
+}
