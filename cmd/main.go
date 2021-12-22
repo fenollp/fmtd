@@ -4,15 +4,18 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
 
 	"github.com/fenollp/fmtd"
 )
 
 var dryrun bool
+var withstderr bool
 
 func init() {
 	flag.BoolVar(&dryrun, "n", false, "dry run: no files will be written")
+	flag.BoolVar(&withstderr, "2", false, "show Docker progress")
 	flag.Parse()
 }
 
@@ -27,7 +30,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	switch err := fmtd.Fmt(ctx, pwd, dryrun, os.Stderr, flag.Args()); err {
+	stderr := ioutil.Discard
+	if withstderr {
+		stderr = os.Stderr
+	}
+
+	switch err := fmtd.Fmt(ctx, pwd, dryrun, os.Stdout, stderr, flag.Args()); err {
 	case nil:
 	case fmtd.ErrDryRunFoundFiles:
 		perr(err)

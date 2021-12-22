@@ -32,24 +32,31 @@ func dockerfile() []byte {
 		// JSON
 		"*.json",
 		// YAML
-		"*.yaml", "*.yml",
+		// TODO: "*.yaml", "*.yml",
 		// Python
 		"*.py",
 		// Erlang
-		"*.erl",
+		// TODO: "*.erl",
 		// Bazel / Skylark / Starlark
 		"BUILD", "*.BUILD", "*.bzl", "*.sky", "*.star", "WORKSPACE",
+		// Shell
+		"*.sh",
+		// SQL
+		"*.sql",
+		// Go
+		// TODO: "*.go",
 	}
 
 	return []byte(`
 # syntax=docker.io/docker/dockerfile:1@sha256:42399d4635eddd7a9b8a24be879d2f9a930d0ed040a61324cfdf59ef1357b3b2
 `[1:] + `
 FROM --platform=$BUILDPLATFORM docker.io/library/alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300 AS alpine
+FROM --platform=$BUILDPLATFORM docker.io/whilp/buildifier@sha256:67da91fdddd40e9947153bc9157ab9103c141fcabcdbf646f040ba7a763bc531 AS buildifier
+FROM --platform=$BUILDPLATFORM docker.io/unibeautify/clang-format@sha256:1b2d3997012ae221c600668802f1b761973d9006d330effa9555516432dea9c1 AS clang-format
 
 # See https://github.com/Unibeautify/docker-beautifiers
 
 FROM alpine AS tool
-COPY --from=unibeautify/clang-format /usr/bin/clang-format /usr/bin/clang-format
 WORKDIR /app/b
 WORKDIR /app/a
 ARG YAPF_VERSION=0.31.0
@@ -63,6 +70,8 @@ RUN \
       yapf=="$YAPF_VERSION" \
       beautysh=="$BEAUTYSH_VERSION" \
       sqlparse=="$SQLFORMAT_VERSION"
+COPY --from=buildifier /usr/bin/buildifier /usr/bin/buildifier
+COPY --from=clang-format /usr/bin/clang-format /usr/bin/clang-format
 
 FROM tool AS product
 COPY a /app/a/
@@ -73,6 +82,7 @@ RUN \
       && \
       case "$f" in \
         *.c|*.cc|*.cpp|*.h|*.hh|*.proto|*.m|*.mm) clang-format -style=google -sort-includes "$f" >../b/"$f";; \
+        BUILD|*.BUILD|*.bzl|*.sky|*.star|WORKSPACE) cp "$f" ../b/"$f" && buildifier -lint=fix ../b/"$f" ;; \
         *.json) cat "$f" | jq -S --tab . >../b/"$f" ;; \
         *.py) yapf --style=google "$f" >../b/"$f" ;; \
         *.sh) beautysh --backup "$f" && mv "$f".bak ../b/"$f" ;; \
@@ -85,11 +95,8 @@ RUN \
    done < <(find . -type f \( -iname '` + strings.Join(patterns, "' -or -iname '") + `' \))
 
 FROM scratch
-COPY --from=product /app/b/* /
+COPY --from=product /app/b /
 `)
-	// #*.yaml|*.yml)  $HOME/.bin/format-yaml.sh "$f" ;; \
-	// #*.erl)  emacs --script $HOME/.bin/erlfmt.el "$f" ;;#TODO: use my erlfmt \
-	// #BUILD|*/BUILD|*.BUILD|*.bzl|*.sky|*.star|WORKSPACE|*/WORKSPACE) buildifier -lint=fix "$f" ;; \
 }
 
 // Fmt formats (any) files below the current directory
@@ -97,7 +104,7 @@ func Fmt(
 	ctx context.Context,
 	pwd string,
 	dryrun bool,
-	stderr io.Writer,
+	stdout, stderr io.Writer,
 	filenames []string,
 ) error {
 	exe, err := exec.LookPath("docker")
@@ -170,19 +177,19 @@ func Fmt(
 		return err
 	}
 
-	var stdout bytes.Buffer
+	var tarbuf bytes.Buffer
 	cmd := exec.CommandContext(ctx, exe, "build", "--output=-", "-")
 	cmd.Env = append(os.Environ(),
 		"DOCKER_BUILDKIT=1",
 	)
 	cmd.Stdin = &stdin
-	cmd.Stdout = &stdout
+	cmd.Stdout = &tarbuf
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		return err
 	}
 
-	tr := tar.NewReader(&stdout)
+	tr := tar.NewReader(&tarbuf)
 	foundFiles := false
 	for {
 		hdr, err := tr.Next()
@@ -213,10 +220,6 @@ func Fmt(
 			if err := f.Close(); err != nil {
 				return err
 			}
-			fmt.Println()
-			// write to fn~(~ as many as needed)
-			// created from fmode
-			// then mv
 		}
 	}
 	if dryrun && foundFiles {
