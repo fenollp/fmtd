@@ -26,31 +26,11 @@ func unusable(fn string, err error) error {
 }
 
 func dockerfile() []byte {
-	patterns := []string{
-		// C / C++ / Protocol Buffers / Objective-C / Objective-C++
-		"*.c", "*.cc", "*.cpp", "*.h", "*.hh", "*.proto", "*.m", "*.mm",
-		// JSON
-		"*.json",
-		// YAML
-		// TODO: "*.yaml", "*.yml",
-		// Python
-		"*.py",
-		// Erlang
-		// TODO: "*.erl",
-		// Bazel / Skylark / Starlark
-		"BUILD", "*.BUILD", "*.bzl", "*.sky", "*.star", "WORKSPACE",
-		// Shell
-		"*.sh",
-		// SQL
-		"*.sql",
-		// Go
-		// TODO: "*.go",
-	}
-
 	return []byte(`
 # syntax=docker.io/docker/dockerfile:1@sha256:42399d4635eddd7a9b8a24be879d2f9a930d0ed040a61324cfdf59ef1357b3b2
 `[1:] + `
 FROM --platform=$BUILDPLATFORM docker.io/library/alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300 AS alpine
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1@sha256:4918412049183afe42f1ecaf8f5c2a88917c2eab153ce5ecf4bf2d55c1507b74 AS golang
 FROM --platform=$BUILDPLATFORM docker.io/whilp/buildifier@sha256:67da91fdddd40e9947153bc9157ab9103c141fcabcdbf646f040ba7a763bc531 AS buildifier
 FROM --platform=$BUILDPLATFORM docker.io/unibeautify/clang-format@sha256:1b2d3997012ae221c600668802f1b761973d9006d330effa9555516432dea9c1 AS clang-format
 
@@ -66,11 +46,13 @@ RUN \
   --mount=type=cache,target=/var/cache/apk ln -vs /var/cache/apk /etc/apk/cache && \
     set -ux \
  && apk add --no-cache py3-pip clang emacs jq \
+ && touch /app/stdout \
  && pip3 install \
       yapf=="$YAPF_VERSION" \
       beautysh=="$BEAUTYSH_VERSION" \
       sqlparse=="$SQLFORMAT_VERSION"
-COPY --from=buildifier /usr/bin/buildifier /usr/bin/buildifier
+COPY --from=buildifier /buildifier /usr/bin/buildifier
+COPY --from=golang /usr/local/go/bin/gofmt /usr/bin/gofmt
 COPY --from=clang-format /usr/bin/clang-format /usr/bin/clang-format
 
 FROM tool AS product
@@ -78,24 +60,37 @@ COPY a /app/a/
 RUN \
     set -ux \
  && while read -r f; do \
+      f=${f#./*} \
+      && \
       mkdir -p ../b/"$(dirname "$f")" \
       && \
       case "$f" in \
+      # C / C++ / Protocol Buffers / Objective-C / Objective-C++
         *.c|*.cc|*.cpp|*.h|*.hh|*.proto|*.m|*.mm) clang-format -style=google -sort-includes "$f" >../b/"$f";; \
+      # Bazel / Skylark / Starlark
         BUILD|*.BUILD|*.bzl|*.sky|*.star|WORKSPACE) cp "$f" ../b/"$f" && buildifier -lint=fix ../b/"$f" ;; \
+      # JSON
         *.json) cat "$f" | jq -S --tab . >../b/"$f" ;; \
+      # Python
         *.py) yapf --style=google "$f" >../b/"$f" ;; \
+      # Shell
         *.sh) beautysh --backup "$f" && mv "$f".bak ../b/"$f" ;; \
+      # SQL
         *.sql) sqlformat "$f" >../b/"$f" ;; \
-        *) echo "unhandled $f" ;; \
+      # Go
+        *.go) gofmt -s "$f" >../b/"$f" ;; \
+      # YAML TODO: *.yaml|*.yml)
+      # Erlang TODO: *.erl)
+        *) echo "! $f" >>../stdout ;; \
       esac \
       && \
-      if diff -q "$f" ../b/"$f" >/dev/null; then rm ../b/"$f"; fi \
+      if [ -f ../b/"$f" ] && diff -q "$f" ../b/"$f" >/dev/null; then rm ../b/"$f"; fi \
       ; \
-   done < <(find . -type f \( -iname '` + strings.Join(patterns, "' -or -iname '") + `' \))
+   done < <(find . -type f)
 
 FROM scratch
-COPY --from=product /app/b /
+COPY --from=product /app/b/ /
+COPY --from=product /app/stdout /
 `)
 }
 
@@ -191,6 +186,7 @@ func Fmt(
 
 	tr := tar.NewReader(&tarbuf)
 	foundFiles := false
+	var stdoutf bytes.Buffer
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -202,9 +198,17 @@ func Fmt(
 		if strings.HasSuffix(hdr.Name, "/") {
 			continue
 		}
-		fmt.Println(hdr.Name)
+		if hdr.Name == "stdout" {
+			if _, err := io.Copy(&stdoutf, tr); err != nil { // show later
+				return err
+			}
+			continue
+		}
+		name := strings.TrimPrefix(hdr.Name, "b/")
+		fmt.Fprintf(stdout, "%s\n", name)
+		foundFiles = true
 		if !dryrun {
-			f, err := os.OpenFile(hdr.Name, os.O_RDWR, 0) // already exists
+			f, err := os.OpenFile(name, os.O_RDWR, 0) // already exists
 			if err != nil {
 				return err
 			}
@@ -221,6 +225,9 @@ func Fmt(
 				return err
 			}
 		}
+	}
+	if _, err := io.Copy(stdout, &stdoutf); err != nil {
+		return err
 	}
 	if dryrun && foundFiles {
 		return ErrDryRunFoundFiles

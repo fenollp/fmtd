@@ -22,7 +22,9 @@ func init() {
 func main() {
 	ctx := context.Background()
 
-	perr := func(err error) { fmt.Fprintf(os.Stderr, "fmtd: %v\n", err) }
+	stdout := os.Stdout
+
+	perr := func(err error) { fmt.Fprintf(stdout, "fmtd: %v\n", err) }
 
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -35,10 +37,9 @@ func main() {
 		stderr = os.Stderr
 	}
 
-	switch err := fmtd.Fmt(ctx, pwd, dryrun, os.Stdout, stderr, flag.Args()); err {
+	switch err := fmtd.Fmt(ctx, pwd, dryrun, stdout, stderr, flag.Args()); err {
 	case nil:
 	case fmtd.ErrDryRunFoundFiles:
-		perr(err)
 		os.Exit(2)
 	default:
 		perr(err)
