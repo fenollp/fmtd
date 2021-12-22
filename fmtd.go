@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 )
 
 // ErrNoDocker is returned when no usable Docker client can be found
@@ -38,6 +39,7 @@ func Fmt(
 	if len(filenames) == 0 {
 		return nil
 	}
+	fns := make(map[string]struct{}, len(filenames))
 	for _, filename := range filenames {
 		if err := ensureRegular(filename); err != nil {
 			return err
@@ -50,7 +52,13 @@ func Fmt(
 				return err
 			}
 		}
+		fns[filename] = struct{}{}
 	}
+	filenames = make([]string, 0, len(fns))
+	for fn := range fns {
+		filenames = append(filenames, fn)
+	}
+	sort.Strings(filenames)
 
 	var stdin bytes.Buffer
 	tw := tar.NewWriter(&stdin)
