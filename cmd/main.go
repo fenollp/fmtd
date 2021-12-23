@@ -42,6 +42,9 @@ func main() {
 	case fmtd.ErrDryRunFoundFiles:
 		os.Exit(2)
 	default:
+		if err == fmtd.ErrDockerBuildFailure && !withstderr {
+			err = fmt.Errorf("%w, maybe retry with flag -2", err)
+		}
 		perr(err)
 		os.Exit(1)
 	}

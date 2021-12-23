@@ -18,6 +18,9 @@ import (
 // ErrNoDocker is returned when no usable Docker client can be found
 var ErrNoDocker = errors.New("No docker client found: curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh")
 
+// ErrDockerBuildFailure is returned when docker build failed
+var ErrDockerBuildFailure = errors.New("docker build failed with status 1")
+
 // ErrDryRunFoundFiles is returned when a run would have modified files if it weren't for dryrun
 var ErrDryRunFoundFiles = errors.New("unformatted files found")
 
@@ -29,10 +32,15 @@ func dockerfile() []byte {
 	return []byte(`
 # syntax=docker.io/docker/dockerfile:1@sha256:42399d4635eddd7a9b8a24be879d2f9a930d0ed040a61324cfdf59ef1357b3b2
 `[1:] + `
+
+ARG BUILDIFIER_IMAGE=docker.io/whilp/buildifier@sha256:67da91fdddd40e9947153bc9157ab9103c141fcabcdbf646f040ba7a763bc531
+ARG GOFMT_IMAGE=docker.io/library/golang:1@sha256:4918412049183afe42f1ecaf8f5c2a88917c2eab153ce5ecf4bf2d55c1507b74
+ARG CLANGFORMAT_IMAGE=docker.io/unibeautify/clang-format@sha256:1b2d3997012ae221c600668802f1b761973d9006d330effa9555516432dea9c1
+
 FROM --platform=$BUILDPLATFORM docker.io/library/alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300 AS alpine
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1@sha256:4918412049183afe42f1ecaf8f5c2a88917c2eab153ce5ecf4bf2d55c1507b74 AS golang
-FROM --platform=$BUILDPLATFORM docker.io/whilp/buildifier@sha256:67da91fdddd40e9947153bc9157ab9103c141fcabcdbf646f040ba7a763bc531 AS buildifier
-FROM --platform=$BUILDPLATFORM docker.io/unibeautify/clang-format@sha256:1b2d3997012ae221c600668802f1b761973d9006d330effa9555516432dea9c1 AS clang-format
+FROM --platform=$BUILDPLATFORM $BUILDIFIER_IMAGE AS buildifier
+FROM --platform=$BUILDPLATFORM $GOFMT_IMAGE AS golang
+FROM --platform=$BUILDPLATFORM $CLANGFORMAT_IMAGE AS clang-format
 
 # See https://github.com/Unibeautify/docker-beautifiers
 
@@ -172,8 +180,15 @@ func Fmt(
 		return err
 	}
 
+	args := []string{"build", "--output=-"}
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "ARG_") {
+			args = append(args, "--build-arg="+strings.TrimPrefix(kv, "ARG_"))
+		}
+	}
+	args = append(args, "-")
 	var tarbuf bytes.Buffer
-	cmd := exec.CommandContext(ctx, exe, "build", "--output=-", "-")
+	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Env = append(os.Environ(),
 		"DOCKER_BUILDKIT=1",
 	)
@@ -181,6 +196,9 @@ func Fmt(
 	cmd.Stdout = &tarbuf
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
+		if err.Error() == "exit status 1" {
+			return ErrDockerBuildFailure
+		}
 		return err
 	}
 

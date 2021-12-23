@@ -65,7 +65,7 @@ func (fs tmpfiles) Changed(t *testing.T) {
 	require.Equal(t, string(data), string(fs[fnFormatted]))
 }
 
-func maketmpfs(t *testing.T, fs map[string][]byte) func() {
+func maketmpfs(t *testing.T, fs tmpfiles) func() {
 	funcs := make([]func(), 0, len(fs))
 	for filename, contents := range fs {
 		filename, contents := filename, contents
@@ -99,6 +99,16 @@ func maketmpfs(t *testing.T, fs map[string][]byte) func() {
 			})
 		}
 	}
+
+	if _, ok := fs["testdata/sets_arg.go"]; ok {
+		err := os.Setenv("ARG_GOFMT_IMAGE", "docker.io/library/hello-world")
+		require.NoError(t, err)
+		funcs = append(funcs, func() {
+			err := os.Unsetenv("ARG_GOFMT_IMAGE")
+			require.NoError(t, err)
+		})
+	}
+
 	return func() {
 		for _, f := range funcs {
 			f()
@@ -133,6 +143,8 @@ func TestFmtd(t *testing.T) {
 		{"testdata/some.json": []byte("{ }"), HOME + "/some_outside.yml": []byte("bla:  42")},
 		// Unhandled file: show a warning
 		{"testdata/some.xyz": []byte("bla")},
+		// A Go file using ARG_...: runtime failure
+		{"testdata/sets_arg.go": []byte("package    bla")},
 		// A formatted and an unformatted file: JSON
 		{"testdata/formatted.json": []byte("{}\n"), "testdata/unformatted.json": []byte("{ }")},
 	} {
@@ -200,6 +212,12 @@ func TestFmtd(t *testing.T) {
 				case strings.Contains(name, "some.xyz"):
 					require.NoError(t, err)
 					require.Contains(t, stdout.String(), `! testdata/some.xyz`)
+					require.NotEmpty(t, stderr.String())
+					fs.Unchanged(t)
+
+				case strings.Contains(name, "/sets_arg."):
+					require.EqualError(t, err, fmtd.ErrDockerBuildFailure.Error())
+					require.Empty(t, stdout.String())
 					require.NotEmpty(t, stderr.String())
 					fs.Unchanged(t)
 
