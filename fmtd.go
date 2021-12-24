@@ -18,6 +18,9 @@ import (
 // ErrNoDocker is returned when no usable Docker client can be found
 var ErrNoDocker = errors.New("No docker client found: curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh")
 
+// ErrDockerBuildFailure is returned when docker build failed
+var ErrDockerBuildFailure = errors.New("docker build failed with status 1")
+
 // ErrDryRunFoundFiles is returned when a run would have modified files if it weren't for dryrun
 var ErrDryRunFoundFiles = errors.New("unformatted files found")
 
@@ -25,14 +28,25 @@ func unusable(fn string, err error) error {
 	return fmt.Errorf("unusable file %q (%v)", fn, err)
 }
 
-func dockerfile() []byte {
+func dockerfile(complain bool) []byte {
+	var complaining string
+	if complain {
+		complaining = `echo "! $f" >>../stdout`
+	}
 	return []byte(`
 # syntax=docker.io/docker/dockerfile:1@sha256:42399d4635eddd7a9b8a24be879d2f9a930d0ed040a61324cfdf59ef1357b3b2
 `[1:] + `
+
+ARG BUILDIFIER_IMAGE=docker.io/whilp/buildifier@sha256:67da91fdddd40e9947153bc9157ab9103c141fcabcdbf646f040ba7a763bc531
+ARG CLANGFORMAT_IMAGE=docker.io/unibeautify/clang-format@sha256:1b2d3997012ae221c600668802f1b761973d9006d330effa9555516432dea9c1
+ARG GOFMT_IMAGE=docker.io/library/golang:1@sha256:4918412049183afe42f1ecaf8f5c2a88917c2eab153ce5ecf4bf2d55c1507b74
+ARG SHFMT_IMAGE=docker.io/mvdan/shfmt@sha256:f0d8d9f0c9dc15eb4e76b06035e7ffc59018d08e300e0af096be481a37a7d1dc
+
+FROM --platform=$BUILDPLATFORM $BUILDIFIER_IMAGE AS buildifier
+FROM --platform=$BUILDPLATFORM $CLANGFORMAT_IMAGE AS clang-format
+FROM --platform=$BUILDPLATFORM $GOFMT_IMAGE AS golang
+FROM --platform=$BUILDPLATFORM $SHFMT_IMAGE AS shfmt
 FROM --platform=$BUILDPLATFORM docker.io/library/alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300 AS alpine
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1@sha256:4918412049183afe42f1ecaf8f5c2a88917c2eab153ce5ecf4bf2d55c1507b74 AS golang
-FROM --platform=$BUILDPLATFORM docker.io/whilp/buildifier@sha256:67da91fdddd40e9947153bc9157ab9103c141fcabcdbf646f040ba7a763bc531 AS buildifier
-FROM --platform=$BUILDPLATFORM docker.io/unibeautify/clang-format@sha256:1b2d3997012ae221c600668802f1b761973d9006d330effa9555516432dea9c1 AS clang-format
 
 # See https://github.com/Unibeautify/docker-beautifiers
 
@@ -52,8 +66,9 @@ RUN \
       beautysh=="$BEAUTYSH_VERSION" \
       sqlparse=="$SQLFORMAT_VERSION"
 COPY --from=buildifier /buildifier /usr/bin/buildifier
-COPY --from=golang /usr/local/go/bin/gofmt /usr/bin/gofmt
 COPY --from=clang-format /usr/bin/clang-format /usr/bin/clang-format
+COPY --from=golang /usr/local/go/bin/gofmt /usr/bin/gofmt
+COPY --from=shfmt /bin/shfmt /usr/bin/shfmt
 
 FROM tool AS product
 COPY a /app/a/
@@ -66,7 +81,7 @@ RUN \
       && \
       case "$f" in \
       # C / C++ / Protocol Buffers / Objective-C / Objective-C++
-        *.c|*.cc|*.cpp|*.h|*.hh|*.proto|*.m|*.mm) clang-format -style=google -sort-includes "$f" >../b/"$f";; \
+        *.c|*.cc|*.cpp|*.h|*.hh|*.proto|*.m|*.mm) clang-format -style=google -sort-includes "$f" >../b/"$f" ;; \
       # Bazel / Skylark / Starlark
         BUILD|*.BUILD|*.bzl|*.sky|*.star|WORKSPACE) cp "$f" ../b/"$f" && buildifier -lint=fix ../b/"$f" ;; \
       # JSON
@@ -74,14 +89,14 @@ RUN \
       # Python
         *.py) yapf --style=google "$f" >../b/"$f" ;; \
       # Shell
-        *.sh) beautysh --backup "$f" && mv "$f".bak ../b/"$f" ;; \
+        *.sh) shfmt -s -p -kp "$f" >../b/"$f" ;; \
       # SQL
-        *.sql) sqlformat "$f" >../b/"$f" ;; \
+        *.sql) sqlformat --keywords=upper --reindent --reindent_aligned --use_space_around_operators --comma_first True "$f" >../b/"$f" ;; \
       # Go
         *.go) gofmt -s "$f" >../b/"$f" ;; \
       # YAML TODO: *.yaml|*.yml)
       # Erlang TODO: *.erl)
-        *) echo "! $f" >>../stdout ;; \
+        *) ` + complaining + ` ;; \
       esac \
       && \
       if [ -f ../b/"$f" ] && diff -q "$f" ../b/"$f" >/dev/null; then rm ../b/"$f"; fi \
@@ -108,32 +123,35 @@ func Fmt(
 	}
 
 	if len(filenames) == 0 {
-		return nil
+		filenames = append(filenames, pwd)
 	}
-	files := make(map[string][]byte, len(filenames))
+	fns := make([]string, 0, len(filenames))
+	var moreFns []string
 	for _, filename := range filenames {
-		if _, ok := files[filename]; ok {
-			continue
-		}
-		if err := ensureRegular(filename); err != nil { // TODO: expand directories
+		additional, err := ensureRegular(pwd, filename, dryrun)
+		if err != nil {
 			return err
 		}
-		if err := ensureUnder(pwd, filename); err != nil {
-			return err
-		}
-		if !dryrun {
-			if err := ensureWritable(filename); err != nil {
+		if len(additional) != 0 {
+			moreFns = append(moreFns, additional...)
+		} else {
+			fns = append(fns, filename)
+			if err := ensureUnder(pwd, filename); err != nil {
 				return err
 			}
+			if !dryrun {
+				if err := ensureWritable(filename); err != nil {
+					return err
+				}
+			}
 		}
-		data, err := os.ReadFile(filename)
-		if err != nil {
-			return unusable(filename, err)
-		}
-		files[filename] = data
 	}
-	filenames = make([]string, 0, len(files))
-	for filename := range files {
+	unique := make(map[string]struct{}, len(fns)+len(moreFns))
+	for _, filename := range append(fns, moreFns...) {
+		unique[filename] = struct{}{}
+	}
+	filenames = make([]string, 0, len(unique))
+	for filename := range unique {
 		filenames = append(filenames, filename)
 	}
 	sort.Strings(filenames)
@@ -141,7 +159,7 @@ func Fmt(
 	var stdin bytes.Buffer
 	tw := tar.NewWriter(&stdin)
 	{
-		data := dockerfile()
+		data := dockerfile(len(moreFns) == 0)
 		hdr := &tar.Header{
 			Name: "Dockerfile",
 			Mode: 0200,
@@ -155,7 +173,10 @@ func Fmt(
 		}
 	}
 	for _, filename := range filenames {
-		data := files[filename]
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			return unusable(filename, err)
+		}
 		hdr := &tar.Header{
 			Name: filepath.Join("a", filename),
 			Mode: 0600,
@@ -172,8 +193,15 @@ func Fmt(
 		return err
 	}
 
+	args := []string{"build", "--output=-"}
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "ARG_") {
+			args = append(args, "--build-arg="+strings.TrimPrefix(kv, "ARG_"))
+		}
+	}
+	args = append(args, "-")
 	var tarbuf bytes.Buffer
-	cmd := exec.CommandContext(ctx, exe, "build", "--output=-", "-")
+	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Env = append(os.Environ(),
 		"DOCKER_BUILDKIT=1",
 	)
@@ -181,6 +209,9 @@ func Fmt(
 	cmd.Stdout = &tarbuf
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
+		if err.Error() == "exit status 1" {
+			return ErrDockerBuildFailure
+		}
 		return err
 	}
 
@@ -263,11 +294,34 @@ func ensureWritable(fn string) error {
 	return nil
 }
 
-func ensureRegular(fn string) error {
+func ensureRegular(pwd, fn string, dryrun bool) ([]string, error) {
 	if fi, err := os.Lstat(fn); err != nil {
-		return unusable(fn, err.(*fs.PathError).Unwrap())
-	} else if !fi.Mode().IsRegular() {
-		return unusable(fn, errors.New("not a regular file"))
+		return nil, unusable(fn, err.(*fs.PathError).Unwrap())
+	} else if fi.Mode().IsRegular() {
+		return nil, nil
+	} else if fi.IsDir() {
+		var filenames []string
+		if err := filepath.WalkDir(fn, func(path string, d fs.DirEntry, err error) error {
+			if name := d.Name(); name != "" && name[0] == '.' { // skip hidden files
+				if d.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !d.Type().IsRegular() {
+				return nil
+			}
+			if !dryrun {
+				if err := ensureWritable(path); err != nil {
+					return err
+				}
+			}
+			filenames = append(filenames, path)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+		return filenames, nil
 	}
-	return nil
+	return nil, unusable(fn, errors.New("not a regular file"))
 }
