@@ -137,7 +137,7 @@ func TestFmtd(t *testing.T) {
 		{"non-existing-file": nil, "testdata/some.json": []byte("{ }")},
 
 		// A usable file but also a directory: fail before formatting
-		{"testdata/some.json": []byte("{ }"), "Dtestdata": nil},
+		{"testdata/unformatted.json": []byte("{ }"), "testdata/formatted.json": []byte("{}\n"), "Dtestdata": nil},
 		// A usable file but also a symlink: fail before formatting
 		{"testdata/some.json": []byte("{ }"), "Ltestdata/sym": []byte(".gitkeep")},
 		// A usable file but also an unwritable one: fail before formatting
@@ -180,7 +180,7 @@ func TestFmtd(t *testing.T) {
 				case len(fs.Filenames()) == 0:
 					require.NoError(t, err)
 					require.Empty(t, stdout.String())
-					require.Empty(t, stderr.String())
+					require.NotEmpty(t, stderr.String())
 					fs.Unchanged(t)
 
 				case strings.Contains(name, "_fns:_len:1_"):
@@ -196,10 +196,15 @@ func TestFmtd(t *testing.T) {
 					fs.Unchanged(t)
 
 				case strings.Contains(name, ":testdata+"):
-					require.EqualError(t, err, `unusable file "testdata" (not a regular file)`)
-					require.Empty(t, stdout.String())
-					require.Empty(t, stderr.String())
-					fs.Unchanged(t)
+					if dryrun {
+						require.EqualError(t, err, fmtd.ErrDryRunFoundFiles.Error())
+						fs.Unchanged(t)
+					} else {
+						require.NoError(t, err)
+						fs.Changed(t)
+					}
+					require.Contains(t, stdout.String(), `testdata/unformatted.json`)
+					require.NotEmpty(t, stderr.String())
 
 				case strings.Contains(name, "+testdata/sym_"):
 					require.EqualError(t, err, `unusable file "testdata/sym" (not a regular file)`)

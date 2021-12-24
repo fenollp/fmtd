@@ -28,7 +28,11 @@ func unusable(fn string, err error) error {
 	return fmt.Errorf("unusable file %q (%v)", fn, err)
 }
 
-func dockerfile() []byte {
+func dockerfile(complain bool) []byte {
+	var complaining string
+	if complain {
+		complaining = `echo "! $f" >>../stdout`
+	}
 	return []byte(`
 # syntax=docker.io/docker/dockerfile:1@sha256:42399d4635eddd7a9b8a24be879d2f9a930d0ed040a61324cfdf59ef1357b3b2
 `[1:] + `
@@ -92,7 +96,7 @@ RUN \
         *.go) gofmt -s "$f" >../b/"$f" ;; \
       # YAML TODO: *.yaml|*.yml)
       # Erlang TODO: *.erl)
-        *) echo "! $f" >>../stdout ;; \
+        *) ` + complaining + ` ;; \
       esac \
       && \
       if [ -f ../b/"$f" ] && diff -q "$f" ../b/"$f" >/dev/null; then rm ../b/"$f"; fi \
@@ -119,32 +123,35 @@ func Fmt(
 	}
 
 	if len(filenames) == 0 {
-		return nil
+		filenames = append(filenames, pwd)
 	}
-	files := make(map[string][]byte, len(filenames))
+	fns := make([]string, 0, len(filenames))
+	var moreFns []string
 	for _, filename := range filenames {
-		if _, ok := files[filename]; ok {
-			continue
-		}
-		if err := ensureRegular(filename); err != nil { // TODO: expand directories
+		additional, err := ensureRegular(pwd, filename, dryrun)
+		if err != nil {
 			return err
 		}
-		if err := ensureUnder(pwd, filename); err != nil {
-			return err
-		}
-		if !dryrun {
-			if err := ensureWritable(filename); err != nil {
+		if len(additional) != 0 {
+			moreFns = append(moreFns, additional...)
+		} else {
+			fns = append(fns, filename)
+			if err := ensureUnder(pwd, filename); err != nil {
 				return err
 			}
+			if !dryrun {
+				if err := ensureWritable(filename); err != nil {
+					return err
+				}
+			}
 		}
-		data, err := os.ReadFile(filename)
-		if err != nil {
-			return unusable(filename, err)
-		}
-		files[filename] = data
 	}
-	filenames = make([]string, 0, len(files))
-	for filename := range files {
+	unique := make(map[string]struct{}, len(fns)+len(moreFns))
+	for _, filename := range append(fns, moreFns...) {
+		unique[filename] = struct{}{}
+	}
+	filenames = make([]string, 0, len(unique))
+	for filename := range unique {
 		filenames = append(filenames, filename)
 	}
 	sort.Strings(filenames)
@@ -152,7 +159,7 @@ func Fmt(
 	var stdin bytes.Buffer
 	tw := tar.NewWriter(&stdin)
 	{
-		data := dockerfile()
+		data := dockerfile(len(moreFns) == 0)
 		hdr := &tar.Header{
 			Name: "Dockerfile",
 			Mode: 0200,
@@ -166,7 +173,10 @@ func Fmt(
 		}
 	}
 	for _, filename := range filenames {
-		data := files[filename]
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			return unusable(filename, err)
+		}
 		hdr := &tar.Header{
 			Name: filepath.Join("a", filename),
 			Mode: 0600,
@@ -284,11 +294,34 @@ func ensureWritable(fn string) error {
 	return nil
 }
 
-func ensureRegular(fn string) error {
+func ensureRegular(pwd, fn string, dryrun bool) ([]string, error) {
 	if fi, err := os.Lstat(fn); err != nil {
-		return unusable(fn, err.(*fs.PathError).Unwrap())
-	} else if !fi.Mode().IsRegular() {
-		return unusable(fn, errors.New("not a regular file"))
+		return nil, unusable(fn, err.(*fs.PathError).Unwrap())
+	} else if fi.Mode().IsRegular() {
+		return nil, nil
+	} else if fi.IsDir() {
+		var filenames []string
+		if err := filepath.WalkDir(fn, func(path string, d fs.DirEntry, err error) error {
+			if name := d.Name(); name != "" && name[0] == '.' { // skip hidden files
+				if d.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !d.Type().IsRegular() {
+				return nil
+			}
+			if !dryrun {
+				if err := ensureWritable(path); err != nil {
+					return err
+				}
+			}
+			filenames = append(filenames, path)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+		return filenames, nil
 	}
-	return nil
+	return nil, unusable(fn, errors.New("not a regular file"))
 }
