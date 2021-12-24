@@ -34,13 +34,15 @@ func dockerfile() []byte {
 `[1:] + `
 
 ARG BUILDIFIER_IMAGE=docker.io/whilp/buildifier@sha256:67da91fdddd40e9947153bc9157ab9103c141fcabcdbf646f040ba7a763bc531
-ARG GOFMT_IMAGE=docker.io/library/golang:1@sha256:4918412049183afe42f1ecaf8f5c2a88917c2eab153ce5ecf4bf2d55c1507b74
 ARG CLANGFORMAT_IMAGE=docker.io/unibeautify/clang-format@sha256:1b2d3997012ae221c600668802f1b761973d9006d330effa9555516432dea9c1
+ARG GOFMT_IMAGE=docker.io/library/golang:1@sha256:4918412049183afe42f1ecaf8f5c2a88917c2eab153ce5ecf4bf2d55c1507b74
+ARG SHFMT_IMAGE=docker.io/mvdan/shfmt@sha256:f0d8d9f0c9dc15eb4e76b06035e7ffc59018d08e300e0af096be481a37a7d1dc
 
-FROM --platform=$BUILDPLATFORM docker.io/library/alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300 AS alpine
 FROM --platform=$BUILDPLATFORM $BUILDIFIER_IMAGE AS buildifier
-FROM --platform=$BUILDPLATFORM $GOFMT_IMAGE AS golang
 FROM --platform=$BUILDPLATFORM $CLANGFORMAT_IMAGE AS clang-format
+FROM --platform=$BUILDPLATFORM $GOFMT_IMAGE AS golang
+FROM --platform=$BUILDPLATFORM $SHFMT_IMAGE AS shfmt
+FROM --platform=$BUILDPLATFORM docker.io/library/alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300 AS alpine
 
 # See https://github.com/Unibeautify/docker-beautifiers
 
@@ -60,8 +62,9 @@ RUN \
       beautysh=="$BEAUTYSH_VERSION" \
       sqlparse=="$SQLFORMAT_VERSION"
 COPY --from=buildifier /buildifier /usr/bin/buildifier
-COPY --from=golang /usr/local/go/bin/gofmt /usr/bin/gofmt
 COPY --from=clang-format /usr/bin/clang-format /usr/bin/clang-format
+COPY --from=golang /usr/local/go/bin/gofmt /usr/bin/gofmt
+COPY --from=shfmt /bin/shfmt /usr/bin/shfmt
 
 FROM tool AS product
 COPY a /app/a/
@@ -74,7 +77,7 @@ RUN \
       && \
       case "$f" in \
       # C / C++ / Protocol Buffers / Objective-C / Objective-C++
-        *.c|*.cc|*.cpp|*.h|*.hh|*.proto|*.m|*.mm) clang-format -style=google -sort-includes "$f" >../b/"$f";; \
+        *.c|*.cc|*.cpp|*.h|*.hh|*.proto|*.m|*.mm) clang-format -style=google -sort-includes "$f" >../b/"$f" ;; \
       # Bazel / Skylark / Starlark
         BUILD|*.BUILD|*.bzl|*.sky|*.star|WORKSPACE) cp "$f" ../b/"$f" && buildifier -lint=fix ../b/"$f" ;; \
       # JSON
@@ -82,9 +85,9 @@ RUN \
       # Python
         *.py) yapf --style=google "$f" >../b/"$f" ;; \
       # Shell
-        *.sh) beautysh --backup "$f" && mv "$f".bak ../b/"$f" ;; \
+        *.sh) shfmt -s -p -kp "$f" >../b/"$f" ;; \
       # SQL
-        *.sql) sqlformat "$f" >../b/"$f" ;; \
+        *.sql) sqlformat --keywords=upper --reindent --reindent_aligned --use_space_around_operators --comma_first True "$f" >../b/"$f" ;; \
       # Go
         *.go) gofmt -s "$f" >../b/"$f" ;; \
       # YAML TODO: *.yaml|*.yml)

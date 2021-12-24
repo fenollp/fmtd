@@ -62,7 +62,7 @@ func (fs tmpfiles) Changed(t *testing.T) {
 	require.NotEqual(t, string(fs[fnFormatted]), string(fs[fnUnformatted]))
 	data, err := os.ReadFile(fnUnformatted)
 	require.NoError(t, err)
-	require.Equal(t, string(data), string(fs[fnFormatted]))
+	require.Equal(t, string(fs[fnFormatted]), string(data))
 }
 
 func maketmpfs(t *testing.T, fs tmpfiles) func() {
@@ -127,12 +127,15 @@ func TestFmtd(t *testing.T) {
 	for _, fs := range []tmpfiles{
 		// No files: don't fail but still check for usable docker client
 		{},
+
 		// Empty file name: fail
 		{"": nil},
+
 		// Non existing file: fail
 		{"non-existing-file": nil},
 		// Non existing file but another usable one: fail before formatting
 		{"non-existing-file": nil, "testdata/some.json": []byte("{ }")},
+
 		// A usable file but also a directory: fail before formatting
 		{"testdata/some.json": []byte("{ }"), "Dtestdata": nil},
 		// A usable file but also a symlink: fail before formatting
@@ -141,12 +144,27 @@ func TestFmtd(t *testing.T) {
 		{"testdata/some.json": []byte("{ }"), "Utestdata/blip": []byte("blop")},
 		// A usable file but also one above PWD: fail before formatting
 		{"testdata/some.json": []byte("{ }"), HOME + "/some_outside.yml": []byte("bla:  42")},
+
 		// Unhandled file: show a warning
 		{"testdata/some.xyz": []byte("bla")},
+
 		// A Go file using ARG_...: runtime failure
 		{"testdata/sets_arg.go": []byte("package    bla")},
+
 		// A formatted and an unformatted file: JSON
 		{"testdata/formatted.json": []byte("{}\n"), "testdata/unformatted.json": []byte("{ }")},
+		// A formatted and an unformatted file: Protocol Buffers
+		{"testdata/formatted.proto": []byte("message Bla {\n  int32 f = 42;\n}\n"), "testdata/unformatted.proto": []byte("message   Bla  {int32 f = 42;}\n")},
+		// A formatted and an unformatted file: Starlark
+		{"testdata/formatted.star": []byte("a = 1\n"), "testdata/unformatted.star": []byte("a=1  ")},
+		// A formatted and an unformatted file: Python
+		{"testdata/formatted.py": []byte("a = 1\r\n"), "testdata/unformatted.py": []byte("a=1")},
+		// A formatted and an unformatted file: Shell
+		{"testdata/formatted.sh": []byte("a=1\nb=2\n"), "testdata/unformatted.sh": []byte("a=1;b=2")},
+		// A formatted and an unformatted file: SQL
+		{"testdata/formatted.sql": []byte("SELECT a\n\n  FROM b"), "testdata/unformatted.sql": []byte("select     a FROM  b\n")},
+		// A formatted and an unformatted file: Go
+		{"testdata/formatted.go": []byte("package p\n"), "testdata/unformatted.go": []byte("package     p")},
 	} {
 		for _, dryrun := range []bool{true, false} {
 			name := fmt.Sprintf("_fns:%s_len:%d_dryrun:%v_", fs, len(fs), dryrun)
@@ -221,7 +239,7 @@ func TestFmtd(t *testing.T) {
 					require.NotEmpty(t, stderr.String())
 					fs.Unchanged(t)
 
-				case strings.Contains(name, "formatted.json"):
+				case strings.Contains(name, "formatted."):
 					if dryrun {
 						require.EqualError(t, err, fmtd.ErrDryRunFoundFiles.Error())
 						fs.Unchanged(t)
@@ -229,8 +247,8 @@ func TestFmtd(t *testing.T) {
 						require.NoError(t, err)
 						fs.Changed(t)
 					}
-					require.Contains(t, stdout.String(), `testdata/unformatted.json`)
-					require.NotContains(t, stdout.String(), `testdata/formatted.json`)
+					require.Contains(t, stdout.String(), `/unformatted.`)
+					require.NotContains(t, stdout.String(), `/formatted.`)
 					require.NotEmpty(t, stderr.String())
 
 				default:
