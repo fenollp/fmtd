@@ -1,8 +1,6 @@
 package fmtd
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,13 +11,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/fenollp/fmtd/buildx"
 )
-
-// ErrNoDocker is returned when no usable Docker client can be found
-var ErrNoDocker = errors.New("No docker client found: curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh")
-
-// ErrDockerBuildFailure is returned when docker build failed
-var ErrDockerBuildFailure = errors.New("docker build failed with status 1")
 
 // ErrDryRunFoundFiles is returned when a run would have modified files if it weren't for dryrun
 var ErrDryRunFoundFiles = errors.New("unformatted files found")
@@ -119,7 +113,7 @@ func Fmt(
 ) error {
 	exe, err := exec.LookPath("docker")
 	if err != nil {
-		return ErrNoDocker
+		return buildx.ErrNoDocker
 	}
 
 	if len(filenames) == 0 {
@@ -156,110 +150,56 @@ func Fmt(
 	}
 	sort.Strings(filenames)
 
-	var stdin bytes.Buffer
-	tw := tar.NewWriter(&stdin)
-	{
-		data := dockerfile(len(moreFns) == 0)
-		hdr := &tar.Header{
-			Name: "Dockerfile",
-			Mode: 0200,
-			Size: int64(len(data)),
-		}
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-		if _, err := tw.Write(data); err != nil {
-			return err
-		}
+	foundFiles := false
+	options := []buildx.Option{
+		buildx.WithContext(ctx),
+		buildx.WithStdout(stdout),
+		buildx.WithStderr(stderr),
+		buildx.WithExecutable(exe),
+		buildx.WithDockerfile(dockerfile(len(moreFns) == 0)),
+		buildx.WithOutputFileFunc(func(filename string, r io.Reader) error {
+			fmt.Fprintf(stdout, "%s\n", filename)
+			foundFiles = true
+			if !dryrun {
+				f, err := os.OpenFile(filename, os.O_RDWR, 0) // already exists
+				if err != nil {
+					return err
+				}
+				if err := f.Truncate(0); err != nil {
+					return err
+				}
+				if _, err := f.Seek(0, 0); err != nil {
+					return err
+				}
+				if _, err := io.Copy(f, r); err != nil {
+					return err
+				}
+				if err := f.Close(); err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
 	}
+
 	for _, filename := range filenames {
 		data, err := os.ReadFile(filename)
 		if err != nil {
 			return unusable(filename, err)
 		}
-		hdr := &tar.Header{
-			Name: filepath.Join("a", filename),
-			Mode: 0600,
-			Size: int64(len(data)),
-		}
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-		if _, err := tw.Write(data); err != nil {
-			return err
-		}
-	}
-	if err := tw.Close(); err != nil {
-		return err
+		options = append(options, buildx.WithInputFile(filename, data))
 	}
 
-	args := []string{"build", "--output=-"}
 	for _, kv := range os.Environ() {
 		if strings.HasPrefix(kv, "ARG_") {
-			args = append(args, "--build-arg="+strings.TrimPrefix(kv, "ARG_"))
+			options = append(options, buildx.WithBuildArg(strings.TrimPrefix(kv, "ARG_")))
 		}
 	}
-	args = append(args, "-")
-	var tarbuf bytes.Buffer
-	cmd := exec.CommandContext(ctx, exe, args...)
-	cmd.Env = append(os.Environ(),
-		"DOCKER_BUILDKIT=1",
-	)
-	cmd.Stdin = &stdin
-	cmd.Stdout = &tarbuf
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		if err.Error() == "exit status 1" {
-			return ErrDockerBuildFailure
-		}
+
+	if err := buildx.New(options...); err != nil {
 		return err
 	}
 
-	tr := tar.NewReader(&tarbuf)
-	foundFiles := false
-	var stdoutf bytes.Buffer
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break // End of archive
-		}
-		if err != nil {
-			return err
-		}
-		if strings.HasSuffix(hdr.Name, "/") {
-			continue
-		}
-		if hdr.Name == "stdout" {
-			if _, err := io.Copy(&stdoutf, tr); err != nil { // show later
-				return err
-			}
-			continue
-		}
-		name := strings.TrimPrefix(hdr.Name, "b/")
-		fmt.Fprintf(stdout, "%s\n", name)
-		foundFiles = true
-		if !dryrun {
-			f, err := os.OpenFile(name, os.O_RDWR, 0) // already exists
-			if err != nil {
-				return err
-			}
-			if err := f.Truncate(0); err != nil {
-				return err
-			}
-			if _, err := f.Seek(0, 0); err != nil {
-				return err
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				return err
-			}
-			if err := f.Close(); err != nil {
-				return err
-			}
-		}
-	}
-	if _, err := io.Copy(stdout, &stdoutf); err != nil {
-		return err
-	}
 	if dryrun && foundFiles {
 		return ErrDryRunFoundFiles
 	}

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/fenollp/fmtd"
+	"github.com/fenollp/fmtd/buildx"
 	"github.com/stretchr/testify/require"
 )
 
@@ -239,7 +240,7 @@ func TestFmtd(t *testing.T) {
 					fs.Unchanged(t)
 
 				case strings.Contains(name, "/sets_arg."):
-					require.EqualError(t, err, fmtd.ErrDockerBuildFailure.Error())
+					require.EqualError(t, err, buildx.ErrDockerBuildFailure.Error())
 					require.Empty(t, stdout.String())
 					require.NotEmpty(t, stderr.String())
 					fs.Unchanged(t)
