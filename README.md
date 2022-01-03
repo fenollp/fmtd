@@ -3,7 +3,7 @@ Universal formatter command
 
 ```shell
 # Install
-DOCKER_BUILDKIT=1 docker build -o=/usr/local/bin/ https://github.com/fenollp/fmtd.git#main
+DOCKER_BUILDKIT=1 docker build -o=/usr/local/bin/ --platform=local https://github.com/fenollp/fmtd.git#main
 
 # Usage
 fmtd *.json src/**.h
@@ -26,9 +26,13 @@ fmtd .
 ```shell
 # An alias to reformat Git tracked and cached files:
 gfmt() {
+    local fs='';
     while read -r f; do
-        fmtd "$f"
-    done < <(git status --short --porcelain -- . | \grep '^. ' | \grep -Eo '[^ ]+$')
+        fs="$fs $f";
+    done < <(git status --short --porcelain -- . | \grep '^. ' | \grep -Eo '[^ ]+$');
+    if [[ -n "$fs" ]]; then
+        fmtd $fs;
+    fi
 }
 ```
 
