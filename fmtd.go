@@ -5,11 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/fenollp/fmtd/buildx"
@@ -18,8 +15,68 @@ import (
 // ErrDryRunFoundFiles is returned when a run would have modified files if it weren't for dryrun
 var ErrDryRunFoundFiles = errors.New("unformatted files found")
 
-func unusable(fn string, err error) error {
-	return fmt.Errorf("unusable file %q (%v)", fn, err)
+// Fmt formats (any) files below the current directory
+func Fmt(
+	ctx context.Context,
+	pwd string,
+	dryrun bool,
+	stdout, stderr io.Writer,
+	filenames []string,
+) error {
+	exe, err := exec.LookPath("docker")
+	if err != nil {
+		return buildx.ErrNoDocker
+	}
+
+	foundFiles := false
+
+	options := []buildx.Option{
+		buildx.WithContext(ctx),
+		buildx.WithInputFiles(
+			buildx.WithPWD(pwd),
+			buildx.WithFilenames(filenames),
+			buildx.WithUseCurrentDirWhenNoPathsGiven(),
+			buildx.WithTraverseDirectories(true),
+			buildx.WithEnsureUnderPWD(true),
+			buildx.WithEnsureWritable(!dryrun),
+			buildx.WithSelectionFailureBuilder(func(fn string, err error) error {
+				return fmt.Errorf("unusable file %q (%v)", fn, err)
+			}),
+		),
+		buildx.WithStdout(stdout),
+		buildx.WithStderr(stderr),
+		buildx.WithExecutable(exe),
+		buildx.WithDockerfile(func(m map[interface{}]interface{}) []byte {
+			foundFilenamesByTraversingDirs := m["foundFilenamesByTraversingDirs"].(bool)
+			return dockerfile(!foundFilenamesByTraversingDirs)
+		}),
+		buildx.WithOutputFileFunc(func(filename string, r io.Reader) error {
+			fmt.Fprintf(stdout, "%s\n", filename)
+			foundFiles = true
+			if !dryrun {
+				if err := buildx.OverwriteFileContents(filename, r); err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	}
+
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "ARG_") {
+			options = append(options, buildx.WithBuildArg(strings.TrimPrefix(kv, "ARG_")))
+		}
+	}
+
+	if err := buildx.New(options...); err != nil {
+		return err
+	}
+
+	if dryrun && foundFiles {
+		return ErrDryRunFoundFiles
+	}
+
+	return nil
 }
 
 func dockerfile(complain bool) []byte {
@@ -99,159 +156,4 @@ FROM scratch
 COPY --from=product /app/b/ /
 COPY --from=product /app/stdout /
 `)
-}
-
-// Fmt formats (any) files below the current directory
-func Fmt(
-	ctx context.Context,
-	pwd string,
-	dryrun bool,
-	stdout, stderr io.Writer,
-	filenames []string,
-) error {
-	exe, err := exec.LookPath("docker")
-	if err != nil {
-		return buildx.ErrNoDocker
-	}
-
-	if len(filenames) == 0 {
-		filenames = append(filenames, pwd)
-	}
-	fns := make([]string, 0, len(filenames))
-	var moreFns []string
-	for _, filename := range filenames {
-		additional, err := ensureRegular(pwd, filename, dryrun)
-		if err != nil {
-			return err
-		}
-		if len(additional) != 0 {
-			moreFns = append(moreFns, additional...)
-		} else {
-			fns = append(fns, filename)
-			if err := ensureUnder(pwd, filename); err != nil {
-				return err
-			}
-			if !dryrun {
-				if err := ensureWritable(filename); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	filenames = uniqueSorted(append(fns, moreFns...))
-
-	foundFiles := false
-	options := []buildx.Option{
-		buildx.WithContext(ctx),
-		buildx.WithStdout(stdout),
-		buildx.WithStderr(stderr),
-		buildx.WithExecutable(exe),
-		buildx.WithDockerfile(dockerfile(len(moreFns) == 0)),
-		buildx.WithOutputFileFunc(func(filename string, r io.Reader) error {
-			fmt.Fprintf(stdout, "%s\n", filename)
-			foundFiles = true
-			if !dryrun {
-				if err := buildx.OverwriteFileContents(filename, r); err != nil {
-					return err
-				}
-			}
-			return nil
-		}),
-	}
-
-	for _, filename := range filenames {
-		data, err := os.ReadFile(filename)
-		if err != nil {
-			return unusable(filename, err)
-		}
-		options = append(options, buildx.WithInputFile(filename, data))
-	}
-
-	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "ARG_") {
-			options = append(options, buildx.WithBuildArg(strings.TrimPrefix(kv, "ARG_")))
-		}
-	}
-
-	if err := buildx.New(options...); err != nil {
-		return err
-	}
-
-	if dryrun && foundFiles {
-		return ErrDryRunFoundFiles
-	}
-
-	return nil
-}
-
-func ensureUnder(pwd, fn string) (err error) {
-	if filepath.VolumeName(fn) != filepath.VolumeName(pwd) {
-		return unusable(fn, errors.New("not on $PWD's volume"))
-	}
-	if fn[0] == '.' || filepath.IsAbs(fn) {
-		var fnabs string
-		if fnabs, err = filepath.Abs(fn); err != nil {
-			return unusable(fn, err)
-		}
-		if !filepath.HasPrefix(fnabs, pwd) {
-			return unusable(fn, errors.New("not under $PWD"))
-		}
-	}
-	return
-}
-
-func ensureWritable(fn string) error {
-	f, err := os.OpenFile(fn, os.O_RDWR, 0200)
-	if err != nil {
-		return unusable(fn, err.(*fs.PathError).Unwrap())
-	}
-	if err := f.Close(); err != nil {
-		return unusable(fn, err)
-	}
-	return nil
-}
-
-func ensureRegular(pwd, fn string, dryrun bool) ([]string, error) {
-	if fi, err := os.Lstat(fn); err != nil {
-		return nil, unusable(fn, err.(*fs.PathError).Unwrap())
-	} else if fi.Mode().IsRegular() {
-		return nil, nil
-	} else if fi.IsDir() {
-		var filenames []string
-		if err := filepath.WalkDir(fn, func(path string, d fs.DirEntry, err error) error {
-			if name := d.Name(); name != "" && name[0] == '.' { // skip hidden files
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if !d.Type().IsRegular() {
-				return nil
-			}
-			if !dryrun {
-				if err := ensureWritable(path); err != nil {
-					return err
-				}
-			}
-			filenames = append(filenames, path)
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-		return filenames, nil
-	}
-	return nil, unusable(fn, errors.New("not a regular file"))
-}
-
-func uniqueSorted(xs []string) []string {
-	uniq := make(map[string]struct{}, len(xs))
-	for _, x := range xs {
-		uniq[x] = struct{}{}
-	}
-	xs = make([]string, 0, len(uniq))
-	for x := range uniq {
-		xs = append(xs, x)
-	}
-	sort.Strings(xs)
-	return xs
 }

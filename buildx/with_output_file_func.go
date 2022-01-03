@@ -1,6 +1,7 @@
 package buildx
 
 import (
+	"errors"
 	"io"
 	"os"
 )

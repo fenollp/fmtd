@@ -17,28 +17,30 @@ type options struct {
 	env            []string
 	exe            string
 	args           []string
-	dockerfile     []byte
+	dockerfiler    func(map[interface{}]interface{}) []byte
 	stdoutf        string
 	dirA, dirB     string
 	ifiles         []inputfile
 	ofilefunc      OutputFileFunc
+
+	foundFilenamesByTraversingDirs bool
 }
 
 // New calls `DOCKER_BUILDKIT=1 docker build ...` with given Dockerfile
 func New(opts ...Option) (err error) {
 	o := &options{
-		ctx:        context.Background(),
-		stdout:     os.Stdout,
-		stderr:     os.Stderr,
-		env:        os.Environ(),
-		exe:        "",
-		args:       []string{"build", "--output=-"},
-		dockerfile: nil,
-		stdoutf:    "stdout",
-		dirA:       "a",
-		dirB:       "b",
-		ifiles:     nil,
-		ofilefunc:  nil,
+		ctx:         context.Background(),
+		stdout:      os.Stdout,
+		stderr:      os.Stderr,
+		env:         os.Environ(),
+		exe:         "",
+		args:        []string{"build", "--output=-"},
+		dockerfiler: nil,
+		stdoutf:     "stdout",
+		dirA:        "a",
+		dirB:        "b",
+		ifiles:      nil,
+		ofilefunc:   nil,
 	}
 
 	for _, opt := range opts {
@@ -55,7 +57,10 @@ func New(opts ...Option) (err error) {
 		o.exe = exe
 	}
 
-	if len(o.dockerfile) == 0 {
+	dockerfile := o.dockerfiler(map[interface{}]interface{}{
+		"foundFilenamesByTraversingDirs": o.foundFilenamesByTraversingDirs,
+	})
+	if len(dockerfile) == 0 {
 		return ErrNoDockerfile
 	}
 
@@ -65,12 +70,12 @@ func New(opts ...Option) (err error) {
 		hdr := &tar.Header{
 			Name: "Dockerfile",
 			Mode: 0200,
-			Size: int64(len(o.dockerfile)),
+			Size: int64(len(dockerfile)),
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
-		if _, err := tw.Write(o.dockerfile); err != nil {
+		if _, err := tw.Write(dockerfile); err != nil {
 			return err
 		}
 	}

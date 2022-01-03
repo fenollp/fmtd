@@ -76,9 +76,9 @@ func WithBuildArg(arg string) Option {
 var ErrNoDockerfile = errors.New("missing Dockerfile")
 
 // WithDockerfile have build run with given Dockerfile.
-func WithDockerfile(dockerfile []byte) Option {
+func WithDockerfile(dockerfiler func(map[interface{}]interface{}) []byte) Option {
 	return func(o *options) error {
-		o.dockerfile = dockerfile
+		o.dockerfiler = dockerfiler
 		return nil
 	}
 }
