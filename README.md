@@ -20,7 +20,7 @@ export ARG_CLANGFORMAT_IMAGE=docker.io/unibeautify/clang-format@sha256:1b2d39970
 export ARG_GOFMT_IMAGE=docker.io/library/golang:1@sha256:4918412049183afe42f1ecaf8f5c2a88917c2eab153ce5ecf4bf2d55c1507b74
 export ARG_SQLFORMAT_VERSION=0.4.2
 export ARG_YAPF_VERSION=0.31.0
-fmtd ...
+fmtd .
 ```
 
 ```shell
@@ -32,6 +32,6 @@ gfmt() {
 }
 ```
 
+***
 
 TODO: pass `./docker_cli*_test.go` tests and use github.com/docker/docker/client instead of `docker` command.
-TODO: turn the core into a lib that'd allow passing input files to a Docker-ized command and getting output files (e.g. for `protoc`)

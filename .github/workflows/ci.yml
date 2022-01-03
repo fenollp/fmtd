@@ -99,3 +99,7 @@ jobs:
     - run: go test -tags osusergo -v ./...
     - if: runner.os == 'Linux'
       run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
+
+    - name: Ensure fmtd Dockerfile ARGs are all (no more no less) mentioned in README
+      run: |
+        [[ $(git grep -Fc 'export ARG_' README.md | cut -d: -f2) -eq $(git grep -Fc 'ARG ' fmtd.go | cut -d: -f2) ]]

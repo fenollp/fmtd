@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/fenollp/fmtd"
+	"github.com/fenollp/fmtd/buildx"
 )
 
 var dryrun bool
@@ -42,7 +43,7 @@ func main() {
 	case fmtd.ErrDryRunFoundFiles:
 		os.Exit(2)
 	default:
-		if err == fmtd.ErrDockerBuildFailure && !withstderr {
+		if err == buildx.ErrDockerBuildFailure && !withstderr {
 			err = fmt.Errorf("%w, maybe retry with flag -2", err)
 		}
 		perr(err)
