@@ -48,7 +48,6 @@ FROM alpine AS tool
 WORKDIR /app/b
 WORKDIR /app/a
 ARG YAPF_VERSION=0.31.0
-ARG BEAUTYSH_VERSION=6.2.1
 ARG SQLFORMAT_VERSION=0.4.2
 RUN \
   --mount=type=cache,target=/var/cache/apk ln -vs /var/cache/apk /etc/apk/cache && \
@@ -57,7 +56,6 @@ RUN \
  && touch /app/stdout \
  && pip3 install \
       yapf=="$YAPF_VERSION" \
-      beautysh=="$BEAUTYSH_VERSION" \
       sqlparse=="$SQLFORMAT_VERSION"
 COPY --from=buildifier /buildifier /usr/bin/buildifier
 COPY --from=clang-format /usr/bin/clang-format /usr/bin/clang-format
