@@ -138,15 +138,7 @@ func Fmt(
 			}
 		}
 	}
-	unique := make(map[string]struct{}, len(fns)+len(moreFns))
-	for _, filename := range append(fns, moreFns...) {
-		unique[filename] = struct{}{}
-	}
-	filenames = make([]string, 0, len(unique))
-	for filename := range unique {
-		filenames = append(filenames, filename)
-	}
-	sort.Strings(filenames)
+	filenames = uniqueSorted(append(fns, moreFns...))
 
 	foundFiles := false
 	options := []buildx.Option{
@@ -159,20 +151,7 @@ func Fmt(
 			fmt.Fprintf(stdout, "%s\n", filename)
 			foundFiles = true
 			if !dryrun {
-				f, err := os.OpenFile(filename, os.O_RDWR, 0) // already exists
-				if err != nil {
-					return err
-				}
-				if err := f.Truncate(0); err != nil {
-					return err
-				}
-				if _, err := f.Seek(0, 0); err != nil {
-					return err
-				}
-				if _, err := io.Copy(f, r); err != nil {
-					return err
-				}
-				if err := f.Close(); err != nil {
+				if err := buildx.OverwriteFileContents(filename, r); err != nil {
 					return err
 				}
 			}
@@ -262,4 +241,17 @@ func ensureRegular(pwd, fn string, dryrun bool) ([]string, error) {
 		return filenames, nil
 	}
 	return nil, unusable(fn, errors.New("not a regular file"))
+}
+
+func uniqueSorted(xs []string) []string {
+	uniq := make(map[string]struct{}, len(xs))
+	for _, x := range xs {
+		uniq[x] = struct{}{}
+	}
+	xs = make([]string, 0, len(uniq))
+	for x := range uniq {
+		xs = append(xs, x)
+	}
+	sort.Strings(xs)
+	return xs
 }
