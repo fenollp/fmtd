@@ -128,11 +128,11 @@ RUN \
       && \
       mkdir -p ../b/"$(dirname "$f")" \
       && \
-      case "$f" in \
+      case "$(echo "$f" | tr '[:upper:]' '[:lower:]')" in \
       # C / C++ / Protocol Buffers / Objective-C / Objective-C++
         *.c|*.cc|*.cpp|*.h|*.hh|*.proto|*.m|*.mm) clang-format -style=google -sort-includes "$f" >../b/"$f" ;; \
       # Bazel / Skylark / Starlark
-        BUILD|*.BUILD|*.bzl|*.sky|*.star|WORKSPACE) cp "$f" ../b/"$f" && buildifier -lint=fix ../b/"$f" ;; \
+        build|*/build|*.build|*.bzl|*.sky|*.star|workspace|*/workspace) cp "$f" ../b/"$f" && buildifier -lint=fix ../b/"$f" ;; \
       # JSON
         *.json) cat "$f" | jq -S --tab . >../b/"$f" ;; \
       # Python
