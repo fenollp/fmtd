@@ -9,7 +9,7 @@ require (
 
 require (
 	github.com/Microsoft/go-winio v0.4.17 // indirect
-	github.com/containerd/containerd v1.5.8 // indirect
+	github.com/containerd/containerd v1.5.9 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/distribution v2.7.1+incompatible // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
@@ -31,4 +31,5 @@ require (
 	google.golang.org/grpc v1.43.0 // indirect
 	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c // indirect
+	gotest.tools/v3 v3.1.0 // indirect
 )
