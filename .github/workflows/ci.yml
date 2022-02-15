@@ -86,19 +86,19 @@ jobs:
 
     - run: go mod download && go mod tidy && go mod verify
     - if: runner.os == 'Linux'
-      run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
+      run: git --no-pager diff --exit-code
 
     - run: go vet -tags osusergo ./...
     - if: runner.os == 'Linux'
-      run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
+      run: git --no-pager diff --exit-code
 
     - run: go fmt ./...
     - if: runner.os == 'Linux'
-      run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
+      run: git --no-pager diff --exit-code
 
     - run: go test -tags osusergo -v ./...
     - if: runner.os == 'Linux'
-      run: git --no-pager diff && [[ $(git --no-pager diff --name-only | wc -l) = 0 ]]
+      run: git --no-pager diff --exit-code
 
     - name: Ensure fmtd Dockerfile ARGs are all (no more no less) mentioned in README
       run: |
