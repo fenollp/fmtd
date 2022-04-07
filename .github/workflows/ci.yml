@@ -20,7 +20,7 @@ jobs:
         shell: bash
     name: buildkit on ${{ matrix.os }}
     steps:
-    - uses: docker-practice/actions-setup-docker@master
+    - uses: docker-practice/actions-setup-docker@v1
       if: runner.os == 'macOS'
     - run: docker version
     - uses: docker/login-action@v1
@@ -49,7 +49,7 @@ jobs:
         shell: bash
     name: ${{ matrix.go }} on ${{ matrix.os }}
     steps:
-    - uses: docker-practice/actions-setup-docker@master
+    - uses: docker-practice/actions-setup-docker@v1
       if: runner.os == 'macOS'
 
     - run: docker version
