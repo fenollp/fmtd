@@ -117,6 +117,25 @@ func maketmpfs(t *testing.T, fs tmpfiles) func() {
 	}
 }
 
+var toml_unformatted = `
+[target.x86_64-unknown-linux-gnu]
+# Compressing debug information can yield hundreds of megabytes of savings.
+# The Rust toolchain does not currently perform dead code elimination on
+# debug info.
+#
+# See: https://github.com/rust-lang/rust/issues/56068
+# See: https://reviews.llvm.org/D74169#1990180
+rustflags = ["-C", "link-arg=-Wl,--compress-debug-sections=zlib-gabi"]
+`[1:]
+
+var toml_formatted_but_comments_gone = `
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    '-C',
+    'link-arg=-Wl,--compress-debug-sections=zlib-gabi',
+]
+`[1:]
+
 func TestFmtd(t *testing.T) {
 	ctx := context.Background()
 	pwd, err := os.Getwd()
@@ -166,6 +185,8 @@ func TestFmtd(t *testing.T) {
 		{"testdata/formatted.sql": []byte("SELECT a\n\n  FROM b"), "testdata/unformatted.sql": []byte("select     a FROM  b\n")},
 		// A formatted and an unformatted file: Go
 		{"testdata/formatted.go": []byte("package p\n"), "testdata/unformatted.go": []byte("package     p")},
+		// A formatted and an unformatted file: TOML
+		{"testdata/formatted.toml": []byte(toml_formatted_but_comments_gone), "testdata/unformatted.toml": []byte(toml_unformatted)},
 	} {
 		for _, dryrun := range []bool{true, false} {
 			name := fmt.Sprintf("_fns:%s_len:%d_dryrun:%v_", fs, len(fs), dryrun)
