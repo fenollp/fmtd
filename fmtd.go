@@ -104,23 +104,34 @@ FROM --platform=$BUILDPLATFORM $TOMLFMT_IMAGE AS rust
 
 # See https://github.com/Unibeautify/docker-beautifiers
 
-FROM rust AS toml-fmt
+# https://github.com/Unibeautify/docker-beautifiers/issues/63
+FROM rust AS tomlfmt
 RUN \
   --mount=type=cache,target=/usr/local/cargo/registry/index/ \
   --mount=type=cache,target=/usr/local/cargo/registry/cache/ \
   --mount=type=cache,target=/usr/local/cargo/git/db/ \
     set -ux \
- && cargo install --git https://github.com/segeljakt/toml-fmt
+ && rustup target add x86_64-unknown-linux-musl \
+#&& cargo install --target x86_64-unknown-linux-musl --git https://github.com/segeljakt/toml-fmt \
+# TODO: whence https://github.com/segeljakt/toml-fmt/pull/3
+ && cargo install --target x86_64-unknown-linux-musl --git https://github.com/fenollp/toml-fmt --branch upupup \
+ && [ '[a]' = "$(echo '[a]' | toml-fmt)" ]
 
 FROM alpine AS tool
 WORKDIR /app/b
 WORKDIR /app/a
-ARG YAPF_VERSION=0.31.0
+ARG YAPF_VERSION=0.32.0
 ARG SQLFORMAT_VERSION=0.4.2
 RUN \
   --mount=type=cache,target=/var/cache/apk ln -vs /var/cache/apk /etc/apk/cache && \
     set -ux \
- && apk add --no-cache py3-pip clang emacs jq \
+ && apk add --no-cache \
+    # For pip3 install
+      py3-pip \
+    # For clang-format
+      clang \
+    # JSON formatter
+      jq \
  && touch /app/stdout \
  && pip3 install \
       yapf=="$YAPF_VERSION" \
@@ -129,7 +140,7 @@ COPY --from=buildifier /buildifier /usr/bin/buildifier
 COPY --from=clang-format /usr/bin/clang-format /usr/bin/clang-format
 COPY --from=golang /usr/local/go/bin/gofmt /usr/bin/gofmt
 COPY --from=shfmt /bin/shfmt /usr/bin/shfmt
-COPY --from=toml-fmt /usr/local/cargo/bin/toml-fmt /usr/bin/toml-fmt
+COPY --from=tomlfmt /usr/local/cargo/bin/toml-fmt /usr/bin/toml-fmt
 
 FROM tool AS product
 COPY a /app/a/
