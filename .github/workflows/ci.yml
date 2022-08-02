@@ -102,4 +102,4 @@ jobs:
 
     - name: Ensure fmtd Dockerfile ARGs are all (no more no less) mentioned in README
       run: |
-        [[ $(git grep -Fc 'export ARG_' README.md | cut -d: -f2) -eq $(git grep -Fc 'ARG ' fmtd.go | cut -d: -f2) ]]
+        [[ $(git grep -Fc 'export ARG_' README.md | cut -d: -f2) -eq $(cat fmtd.go | grep -vF ALPINE | grep -Fc 'ARG ' | cut -d: -f2) ]]

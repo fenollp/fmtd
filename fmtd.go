@@ -85,31 +85,53 @@ func dockerfile(complain bool) []byte {
 		complaining = `echo "! $f" >>../stdout`
 	}
 	return []byte(`
-# syntax=docker.io/docker/dockerfile:1@sha256:42399d4635eddd7a9b8a24be879d2f9a930d0ed040a61324cfdf59ef1357b3b2
+# syntax=docker.io/docker/dockerfile:1@sha256:443aab4ca21183e069e7d8b2dc68006594f40bddf1b15bbd83f5137bd93e80e2
 `[1:] + `
 
+ARG ALPINE=docker.io/library/alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300
 ARG BUILDIFIER_IMAGE=docker.io/whilp/buildifier@sha256:67da91fdddd40e9947153bc9157ab9103c141fcabcdbf646f040ba7a763bc531
 ARG CLANGFORMAT_IMAGE=docker.io/unibeautify/clang-format@sha256:1b2d3997012ae221c600668802f1b761973d9006d330effa9555516432dea9c1
-ARG GOFMT_IMAGE=docker.io/library/golang:1@sha256:4918412049183afe42f1ecaf8f5c2a88917c2eab153ce5ecf4bf2d55c1507b74
-ARG SHFMT_IMAGE=docker.io/mvdan/shfmt@sha256:f0d8d9f0c9dc15eb4e76b06035e7ffc59018d08e300e0af096be481a37a7d1dc
+ARG GOFMT_IMAGE=docker.io/library/golang:1@sha256:fb249eca1b9172732de4950b0fb0fb5c231b83c2c90952c56d822d8a9de4d64b
+ARG SHFMT_IMAGE=docker.io/mvdan/shfmt@sha256:4564a08dbbc0c4541c182dd28de8ba5dc4a70045a926b4aca2cf76a8f246f28f
+ARG TOMLFMT_IMAGE=docker.io/library/rust:1-slim@sha256:7f959043dd9aac68966ba0d35171073de3e76d917a73c7e237e145cdb86de333
 
+FROM --platform=$BUILDPLATFORM $ALPINE AS alpine
 FROM --platform=$BUILDPLATFORM $BUILDIFIER_IMAGE AS buildifier
 FROM --platform=$BUILDPLATFORM $CLANGFORMAT_IMAGE AS clang-format
 FROM --platform=$BUILDPLATFORM $GOFMT_IMAGE AS golang
 FROM --platform=$BUILDPLATFORM $SHFMT_IMAGE AS shfmt
-FROM --platform=$BUILDPLATFORM docker.io/library/alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300 AS alpine
+FROM --platform=$BUILDPLATFORM $TOMLFMT_IMAGE AS rust
 
 # See https://github.com/Unibeautify/docker-beautifiers
+
+# https://github.com/Unibeautify/docker-beautifiers/issues/63
+FROM rust AS tomlfmt
+RUN \
+  --mount=type=cache,target=/usr/local/cargo/registry/index/ \
+  --mount=type=cache,target=/usr/local/cargo/registry/cache/ \
+  --mount=type=cache,target=/usr/local/cargo/git/db/ \
+    set -ux \
+ && rustup target add x86_64-unknown-linux-musl \
+#&& cargo install --target x86_64-unknown-linux-musl --git https://github.com/segeljakt/toml-fmt \
+# TODO: whence https://github.com/segeljakt/toml-fmt/pull/3
+ && cargo install --target x86_64-unknown-linux-musl --git https://github.com/fenollp/toml-fmt --branch upupup \
+ && [ '[a]' = "$(echo '[a]' | toml-fmt)" ]
 
 FROM alpine AS tool
 WORKDIR /app/b
 WORKDIR /app/a
-ARG YAPF_VERSION=0.31.0
+ARG YAPF_VERSION=0.32.0
 ARG SQLFORMAT_VERSION=0.4.2
 RUN \
   --mount=type=cache,target=/var/cache/apk ln -vs /var/cache/apk /etc/apk/cache && \
     set -ux \
- && apk add --no-cache py3-pip clang emacs jq \
+ && apk add --no-cache \
+    # For pip3 install
+      py3-pip \
+    # For clang-format
+      clang \
+    # JSON formatter
+      jq \
  && touch /app/stdout \
  && pip3 install \
       yapf=="$YAPF_VERSION" \
@@ -118,6 +140,7 @@ COPY --from=buildifier /buildifier /usr/bin/buildifier
 COPY --from=clang-format /usr/bin/clang-format /usr/bin/clang-format
 COPY --from=golang /usr/local/go/bin/gofmt /usr/bin/gofmt
 COPY --from=shfmt /bin/shfmt /usr/bin/shfmt
+COPY --from=tomlfmt /usr/local/cargo/bin/toml-fmt /usr/bin/toml-fmt
 
 FROM tool AS product
 COPY a /app/a/
@@ -129,10 +152,13 @@ RUN \
       mkdir -p ../b/"$(dirname "$f")" \
       && \
       case "$(echo "$f" | tr '[:upper:]' '[:lower:]')" in \
-      # C / C++ / Protocol Buffers / Objective-C / Objective-C++
-        *.c|*.cc|*.cpp|*.h|*.hh|*.proto|*.m|*.mm) clang-format -style=google -sort-includes "$f" >../b/"$f" ;; \
       # Bazel / Skylark / Starlark
         build|*/build|*.build|*.bzl|*.sky|*.star|workspace|*/workspace) cp "$f" ../b/"$f" && buildifier -lint=fix ../b/"$f" ;; \
+      # C / C++ / Protocol Buffers / Objective-C / Objective-C++
+        *.c|*.cc|*.cpp|*.h|*.hh|*.proto|*.m|*.mm) clang-format -style=google -sort-includes "$f" >../b/"$f" ;; \
+      # Erlang TODO: *.erl)
+      # Go
+        *.go) gofmt -s "$f" >../b/"$f" ;; \
       # JSON
         *.json) cat "$f" | jq -S --tab . >../b/"$f" ;; \
       # Python
@@ -141,10 +167,9 @@ RUN \
         *.sh) shfmt -s -p -kp "$f" >../b/"$f" ;; \
       # SQL
         *.sql) sqlformat --keywords=upper --reindent --reindent_aligned --use_space_around_operators --comma_first True "$f" >../b/"$f" ;; \
-      # Go
-        *.go) gofmt -s "$f" >../b/"$f" ;; \
+      # TOML
+        *.toml) cat "$f" | toml-fmt >../b/"$f" ;; \
       # YAML TODO: *.yaml|*.yml)
-      # Erlang TODO: *.erl)
         *) ` + complaining + ` ;; \
       esac \
       && \
