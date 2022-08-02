@@ -91,8 +91,8 @@ func dockerfile(complain bool) []byte {
 ARG ALPINE=docker.io/library/alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300
 ARG BUILDIFIER_IMAGE=docker.io/whilp/buildifier@sha256:67da91fdddd40e9947153bc9157ab9103c141fcabcdbf646f040ba7a763bc531
 ARG CLANGFORMAT_IMAGE=docker.io/unibeautify/clang-format@sha256:1b2d3997012ae221c600668802f1b761973d9006d330effa9555516432dea9c1
-ARG GOFMT_IMAGE=docker.io/library/golang:1@sha256:4918412049183afe42f1ecaf8f5c2a88917c2eab153ce5ecf4bf2d55c1507b74
-ARG SHFMT_IMAGE=docker.io/mvdan/shfmt@sha256:f0d8d9f0c9dc15eb4e76b06035e7ffc59018d08e300e0af096be481a37a7d1dc
+ARG GOFMT_IMAGE=docker.io/library/golang:1@sha256:fb249eca1b9172732de4950b0fb0fb5c231b83c2c90952c56d822d8a9de4d64b
+ARG SHFMT_IMAGE=docker.io/mvdan/shfmt@sha256:4564a08dbbc0c4541c182dd28de8ba5dc4a70045a926b4aca2cf76a8f246f28f
 ARG TOMLFMT_IMAGE=docker.io/library/rust:1-slim@sha256:7f959043dd9aac68966ba0d35171073de3e76d917a73c7e237e145cdb86de333
 
 FROM --platform=$BUILDPLATFORM $ALPINE AS alpine
