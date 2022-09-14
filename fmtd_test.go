@@ -187,6 +187,8 @@ func TestFmtd(t *testing.T) {
 		{"testdata/formatted.go": []byte("package p\n"), "testdata/unformatted.go": []byte("package     p")},
 		// A formatted and an unformatted file: TOML
 		{"testdata/formatted.toml": []byte(toml_formatted_but_comments_gone), "testdata/unformatted.toml": []byte(toml_unformatted)},
+		// A formatted and an unformatted file: Erlang
+		{"testdata/formatted.erl": []byte("-module(bla).\n\n-export([hi/0\n        ]).\n\nhi () ->\n    ok.\n"), "testdata/unformatted.erl": []byte("-module(bla).\n\n-export([hi/0\n]).\n\nhi () ->\nok.\n")},
 	} {
 		for _, dryrun := range []bool{true, false} {
 			name := fmt.Sprintf("_fns:%s_len:%d_dryrun:%v_", fs, len(fs), dryrun)
